@@ -1,0 +1,15 @@
+# ── 凭据与运行数据：绝不提交 ──
+# Qoder（含有效 accessToken/refreshToken）
+scripts/qoder_accounts.json
+scripts/qoder_config.json
+scripts/.qoder_token_cache.json
+# Trae / WorkBuddy 无凭据落盘，但日志可能含账号信息片段
+scripts/*.log
+
+# Python
+__pycache__/
+*.pyc
+
+# 编辑器 / 系统
+.vscode/
+Thumbs.db
