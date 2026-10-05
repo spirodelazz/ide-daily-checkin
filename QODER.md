@@ -26,7 +26,7 @@ qoder_accounts.json       账号数组（accessToken / refreshToken / expiresAt 
 qoder_checkin.log         运行日志（JSON Lines，每行一次运行）
 ```
 
-改编自 [wallechfox/qoder-checkin](https://github.com/wallechfox/qoder-checkin)（MIT），本机适配改动见下文「与上游差异」。
+改编自 [wallechfox/qoder-checkin](https://github.com/wallechfox/qoder-checkin)（MIT），适配改动见下文「与上游差异」。
 
 ## 三、qoder_checkin.py 代码地图
 
@@ -36,7 +36,7 @@ qoder_checkin.log         运行日志（JSON Lines，每行一次运行）
 设备头            device_headers()：config.json 的 device 块 → Cosy-* 请求头（env 可覆盖）
 HTTP              _raw() 单请求；api_call() 端点轮换：网络错误(0)/404 换下一个 base，
                   其余状态码（含 401）视为该端点已给出结论，记住可用的 _BASE
-过期时间          jwt_exp()（JWT 解 exp，本机 dt- 令牌非 JWT 恒为 0）
+过期时间          jwt_exp()（JWT 解 exp，国内版 dt- 令牌非 JWT 恒为 0）
                   coerce_exp() ★ 修复点：ISO 字符串 / epoch 秒 / epoch 毫秒 → 统一 epoch 秒
 token 刷新        do_refresh()：POST /api/v1/deviceToken/refresh {"refresh_token": ...}
 持久化            persist()：写缓存 + 回写 accounts.json（token 轮换后不丢）
@@ -116,7 +116,7 @@ token 刷新        do_refresh()：POST /api/v1/deviceToken/refresh {"refresh_to
 ## 七、与上游 wallechfox/qoder-checkin 的差异（改动原因）
 
 1. **coerce_exp**：国内客户端 `expiresAt` 是 ISO 字符串，上游与 `time.time()` 直接相减会 TypeError → 统一转 epoch 秒
-2. **安装路径**：本机装在 `D:\Qoder CN` 且注册表 InstallLocation 为空 → 提取脚本按版本目录自动定位 runtime-info.exe，无需 QODER_UMID_EXE
+2. **安装路径**：客户端可装在自定义路径（如 `D:\Qoder CN`）且注册表 InstallLocation 可能为空 → 提取脚本按版本目录自动定位 runtime-info.exe，无需 QODER_UMID_EXE
 3. **文件名 `qoder_` 前缀**：与上游 signin.py 共目录不冲突
 4. **pythonw 兜底**：stdout/stderr 为 None 时重定向 devnull；顶层异常强制落日志（否则任务被杀当天日志整条丢失）
 5. **单文件**：合并上游 qoder_core.py + 02_checkin.py，减少文件跳转

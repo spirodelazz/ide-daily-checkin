@@ -38,7 +38,7 @@ Trae 的 token 由客户端运行时自动续期，约每两周启动一次 Trae
 | **Qoder** | 每日 100 Credits | `qoder_extract.py` 从 Qoder 客户端本地解密（DPAPI + AES-GCM），一次性提取 | `openapi.qoder.com.cn/sash/api/v1/me/campaigns/*`（逆向所得） | [qoder-auto-checkin.md](qoder-auto-checkin.md) |
 | **Trae CN** | 每日 200 积分 | 每次运行实时解密 `storage.json` 里的加密登录态（自包含信封，无需客户端参与） | `api.trae.cn/trae/api/v2/ug/checkin_credits/*`（逆向所得） | [trae-auto-checkin.md](trae-auto-checkin.md) |
 
-### 统一签到任务（2026-10-06 起：1 个任务跑全部三套）
+### 统一签到任务
 
 | 任务名 | 触发（独立 Daily 触发器） | 执行 | 时限 |
 |---|---|---|---|
@@ -48,11 +48,11 @@ Trae 的 token 由客户端运行时自动续期，约每两周启动一次 Trae
 - 三套全部幂等，重复运行安全：WorkBuddy 用 `silent-poll`（未签才签）、Qoder claim 幂等、Trae 本地当日去重
 - 顺序执行、单系统超时隔离（WB 420s / Qoder 120s / Trae 120s），任一失败不影响其余
 - 日志：**`all_checkin.log` 是唯一需要查看的文件**——每次运行先汇入三套各自的新增明细行（`script` 字段区分归属），最后一行是 `run_all_checkin` 汇总；`signin.log` / `qoder_checkin.log` / `trae_checkin.log` 保留为脚本原生日志（上游兼容），日常无需查看
-- **原 6 个单系统任务已卸载**；恢复方法：分别运行 `install-windows.ps1` / `install-qoder-windows.ps1` / `install-trae-windows.ps1`，再加 `install-all-checkin.ps1 -KeepExisting` 避免互相覆盖
+- 也可单系统独立部署：分别运行 `scripts\install-windows.ps1` / `install-qoder-windows.ps1` / `install-trae-windows.ps1`（与统一任务二选一，同时装会造成重复触发点）
 - 手动立即跑一次：`Start-ScheduledTask -TaskName 'AllAutoCheckin'`，或前台 `python run_all_checkin.py`
 - 注意：WorkBuddy 的 `silent-poll` 空跑（当天已签且成长中心无事可做）不落明细行，但汇总行始终存在
 
-### 公共设计约定（两套系统一致，改动前先读）
+### 公共设计约定（三套系统一致，改动前先读）
 
 - **pythonw 静默**：无窗口运行，结果只落 JSON 行日志（`signin.log` / `qoder_checkin.log` / `trae_checkin.log`），每行一次运行
 - **隐藏任务**：任务计划程序需「查看 → 显示隐藏的任务」才可见；命令行用 `Get-ScheduledTask`
@@ -81,14 +81,11 @@ ide-daily-checkin\
     ├── qoder_extract.py             Qoder 凭据提取（DPAPI + AES-GCM，一次性）
     ├── trae_checkin_api.mjs         Trae 签到（纯 API，无需启动客户端）
     ├── trae_hidden.vbs              Trae 独立安装时的隐藏包装
-    ├── trae_checkin.mjs             Trae CDP 备用方案（需启动 GUI，未走通）
+    ├── trae_checkin.mjs             Trae CDP 参考实现（改编自 BlueChonk 上游，需启动 GUI）
     ├── install-qoder-windows.ps1 / install-trae-windows.ps1   单系统任务安装脚本
     ├── qoder_config.json / qoder_accounts.json / .qoder_token_cache.json   Qoder 凭据（已 gitignore）
     └── signin.log / qoder_checkin.log / trae_checkin.log / all_checkin.log 日志（已 gitignore）
 ```
-
-> 依赖：Python 3.8+（pythonw 静默运行）+ Node.js ≥ 22（仅 Trae）。首次部署顺序：
-> ① 各客户端登录一次 → ② `python qoder_extract.py` 提取 Qoder 凭据 → ③ `install-all-checkin.ps1` 注册任务。
 
 ## 三、整体流程
 
@@ -137,7 +134,7 @@ python scripts\qoder_checkin.py
 python scripts\signin.py status
 
 # 任务状态（XML 核实最可靠：C:\Windows\System32\Tasks\<任务名>，UTF-16）
-Get-ScheduledTask -TaskName 'WorkBuddyAutoSignin','WorkBuddyGrowthPoll','QoderAutoSignin','QoderSigninPoll' | Select TaskName,State
+Get-ScheduledTask -TaskName 'AllAutoCheckin' | Select TaskName,State
 ```
 
 ### 故障排查
@@ -169,7 +166,7 @@ Unregister-ScheduledTask -TaskName "AllAutoCheckin" -Confirm:$false
 | WorkBuddy | ⚠️ 可以，但依赖客户端**已安装** | ❌ 签到会断 | 每次运行时脚本会短暂拉起客户端安装目录里的 runtime 辅助进程解密磁盘上的凭据文件（`workbuddy-desktop.info`），GUI 无需正在运行；但卸载客户端或凭据文件丢失后无法解密。会话失效时需桌面端重新登录 |
 | Trae CN | ✅ 完全可以（纯 API） | ❌ 签到会断 | 凭据从本地加密存储实时解密，签到是纯 HTTP 调用。注意：token 约 2 周过期、续期靠 Trae 客户端运行时刷新——**每两周内至少启动一次 Trae**，否则日志报 LOGIN_REQUIRED |
 
-**Q：电脑整机关机呢？** 本机方案依赖开机——错过的时点开机后补跑（StartWhenAvailable）。Qoder 单日错过整天则当日额度作废；若需 7×24 领取，Qoder 可迁往常开的 NAS/青龙面板（上游设计目标，把 qoder_config.json / qoder_accounts.json 带上即可），WorkBuddy 也可部署到任何装了客户端并登录过的常开机器（上游另有 macOS launchd 配置示例；Linux 端 CodeBuddy CLI 写出的凭据格式相同）。
+**Q：电脑整机关机呢？** 本方案依赖开机——错过的时点开机后补跑（StartWhenAvailable）。Qoder 单日错过整天则当日额度作废；若需 7×24 领取，Qoder 可迁往常开的 NAS/青龙面板（上游设计目标，把 qoder_config.json / qoder_accounts.json 带上即可），WorkBuddy 也可部署到任何装了客户端并登录过的常开机器（上游另有 macOS launchd 配置示例；Linux 端 CodeBuddy CLI 写出的凭据格式相同）。
 
 ## 六、安全红线
 
@@ -183,11 +180,5 @@ Unregister-ScheduledTask -TaskName "AllAutoCheckin" -Confirm:$false
 - `scripts/signin.py` 来自 [88lin/workbuddy-auto-signin](https://github.com/88lin/workbuddy-auto-signin)（MIT），按许可证原样收录
 - `scripts/qoder_checkin.py` / `qoder_extract.py` 改编自 [wallechfox/qoder-checkin](https://github.com/wallechfox/qoder-checkin)（MIT）
 - `scripts/trae_checkin.mjs`（CDP 备用方案）改编自 [BlueChonk/trae-daily-checkin](https://github.com/BlueChonk/trae-daily-checkin)
-- Trae 纯 API 路线、Qoder 10:00 刷新时间等均经本机实测验证
+- Trae 纯 API 路线、Qoder 10:00 刷新时间等均经实机验证
 
-## 八、发布到 GitHub 前的检查清单
-
-1. `git status` 确认凭据文件（`scripts/qoder_accounts.json` / `qoder_config.json` / `.qoder_token_cache.json`）与 `*.log` 未被跟踪——`.gitignore` 已覆盖，但仍需肉眼复核
-2. 四份 md 文档中的手机号、userId 等已脱敏，发布前再通读一遍
-3. 首次提交：`git init && git add -A && git status` 复核后 `git commit`
-4. 若设为公开仓库，README 顶部免责声明与 LICENSE 第三方归属声明务必保留

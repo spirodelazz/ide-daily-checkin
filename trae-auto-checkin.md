@@ -1,9 +1,7 @@
 # Trae CN 每日自动签到（纯 API，无需启动客户端）
 
-> 参考项目 [BlueChonk/trae-daily-checkin](https://github.com/BlueChonk/trae-daily-checkin)（CDP 模拟点击方案）。
-> 本机最终采用**纯 API 方案**（对 Trae CN 0.5.x 逆向所得）：不启动 Trae 窗口、不依赖 GUI，直接调服务端签到接口。
-> 核验时间：2026-10-06 01:49 —— 纯 API 签到实测成功（+200 Credits），两计划任务注册并端到端触发验证通过。
-> **2026-10-06**：本页的 `TraeAutoSignin` / `TraeSigninPoll` 任务已并入统一任务 `AllAutoCheckin`（README「统一签到任务」），原任务已卸载；`trae_hidden.vbs` 仅独立安装 Trae 任务时需要，统一任务由 pythonw 跑 run_all_checkin.py（无控制台，无需 vbs）。
+> 参考 [BlueChonk/trae-daily-checkin](https://github.com/BlueChonk/trae-daily-checkin)（CDP 模拟点击方案），本项目采用**纯 API 方案**（对 Trae CN 逆向所得）：不启动 Trae 窗口、不依赖 GUI。
+> 默认由统一任务 `AllAutoCheckin` 调用（见 [README.md](README.md)）；`trae_hidden.vbs` 仅单系统独立部署时需要。
 
 ## 原理
 
@@ -23,11 +21,11 @@
 
 ## 与上游 CDP 方案的对比
 
-| | 上游 CDP 方案 | 本机纯 API 方案（采用） |
+| | 上游 CDP 方案 | 纯 API 方案（本项目采用） |
 |---|---|---|
 | 启动 Trae | 需要（带调试端口拉起 GUI） | **不需要** |
 | 依赖 | Node + Trae 可执行文件 | Node ≥ 22 |
-| 风险 | 本机实测 renderer 崩溃（`CodeWindow: renderer process gone`）；Trae 更新可能改 DOM 类名 | Trae 更换加密方案/接口时需重新逆向 |
+| 风险 | 需操作 GUI，实测存在 renderer 进程崩溃风险；Trae 更新可能改 DOM 类名 | Trae 更换加密方案/接口时需重新逆向 |
 | 附带产物 | — | `trae_checkin.mjs`（CDP 版）保留作备用 |
 
 ## 任务总览（均隐藏）
@@ -53,7 +51,7 @@
 | `trae_checkin_api.mjs` | 纯 API 签到主脚本（零依赖，Node ≥ 22） |
 | `trae_hidden.vbs` | wscript 隐藏包装（传退出码） |
 | `install-trae-windows.ps1` | 计划任务安装脚本（可重复运行） |
-| `trae_checkin.mjs` | CDP 版备用脚本（需启动 Trae GUI，本机 renderer 崩溃未走通） |
+| `trae_checkin.mjs` | CDP 版参考脚本（改编自上游，需启动 Trae GUI） |
 | `trae_checkin.log` | 运行日志（JSON Lines，已 gitignore） |
 
 ## 维护

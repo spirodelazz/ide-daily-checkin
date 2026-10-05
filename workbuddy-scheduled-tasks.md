@@ -1,10 +1,7 @@
 # WorkBuddy 本地定时任务（Windows 任务计划程序）
 
-> 记录本机两个 WorkBuddy 自动签到相关计划任务的配置、查看方式与卸载方法。
-> 核验时间：2026-09-29 20:03 —— 两任务均存在且状态 Ready；下次运行：今晚 21:00 轮询、9-30 00:05 每日签到。
-> 日志核验：2026-09-29 00:05 签到成功（连续 13 天，累计 1300 积分），05:00 轮询正常。
-> 注：本目录已更名 `ide-daily-checkin`（原 WorkBuddy-ide-daily-checkin）；两套签到系统总览见 [README.md](README.md)，Qoder 签到见 [qoder-auto-checkin.md](qoder-auto-checkin.md)。
-> **2026-10-06**：本页记录的 `WorkBuddyAutoSignin` / `WorkBuddyGrowthPoll` 两任务已并入统一任务 `AllAutoCheckin`（run_all_checkin.py 以 silent-poll 模式调用本脚本），原任务已卸载；恢复方法见 README「统一签到任务」一节。任务配置本身仍可作参考。
+> WorkBuddy 签到系统详情：单系统独立部署（可选）的任务配置、查看方式与卸载方法。
+> 统一部署时由 `AllAutoCheckin` 以 `silent-poll` 模式调用 `signin.py`，总览见 [README.md](README.md)。
 
 ## 任务总览
 

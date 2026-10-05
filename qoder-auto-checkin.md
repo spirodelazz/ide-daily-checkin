@@ -1,11 +1,9 @@
 # Qoder 每日自动签到（Windows 任务计划程序）
 
-> 已合并进 workbuddy-auto-signin 工具目录，与 WorkBuddy 签到共用一套「隐藏任务 + pythonw 静默 + 错过补跑」模式。
-> 脚本改编自 [wallechfox/qoder-checkin](https://github.com/wallechfox/qoder-checkin)（MIT），适配本机 D 盘安装与 token 格式。
-> 核验时间：2026-10-05 17:42 —— 两任务均注册成功（XML 核实 Enabled/Hidden/触发器无误），手动触发 `QoderSigninPoll` 端到端跑通，日志见 `qoder_checkin.log`。
-> 核验时间：2026-10-06 01:20 —— 因 Qoder 额度每日 10:00（UTC+8）刷新，触发时间调整为 **10:10 主签 + 11/15/19/23 轮询**（原 00:10/05-09-13-17-21 在 10:00 前均为空跑，实测 00:10 返回"已领取"实为昨日 CLAIMED 状态），XML 已核实新触发器生效。
-> 相关：两套系统总览与维护手册见 [README.md](README.md)；代码级细节（接口契约/数据格式/上游差异）见 [QODER.md](QODER.md)。
-> **2026-10-06**：本页的 `QoderAutoSignin` / `QoderSigninPoll` 任务已并入统一任务 `AllAutoCheckin`（10:20/15:00/20:30，触发点按 Qoder 10:00 额度刷新设计），原任务已卸载；脚本与恢复方法不变，详见 README。
+> Qoder 签到系统详情：原理、单系统独立部署（可选）、排障与卸载。
+> 脚本改编自 [wallechfox/qoder-checkin](https://github.com/wallechfox/qoder-checkin)（MIT），适配国内版安装路径与 token 格式。
+> 默认由统一任务 `AllAutoCheckin` 调用（见 [README.md](README.md)「统一签到任务」）；本文的独立任务安装为可选方案。
+> 相关：代码级细节（接口契约/数据格式/上游差异）见 [QODER.md](QODER.md)。
 
 ## 原理
 
@@ -54,7 +52,7 @@ python install-qoder-windows.ps1   # 注册/重装两个计划任务
 | `ERROR` | 网络/接口异常 | 偶发忽略；连续出现再查 |
 | `LOGIN_REQUIRED` | token 与 refreshToken 均失效 | 重跑 `qoder_extract.py` |
 
-token 当前到期：**2026-10-18 20:13**。到期前 72h 脚本会自动刷新；即使刷新接口失效，只要还登录着 Qoder 客户端，重新跑一次提取即可。
+token 到期前 72h 脚本会自动刷新；即使刷新接口失效，只要还登录着 Qoder 客户端，重新跑一次提取即可。
 
 ## 相关文件（均在 `scripts\`）
 
@@ -87,7 +85,7 @@ Disable-ScheduledTask -TaskName "QoderSigninPoll"
 ## 相对上游项目的改动
 
 1. **expiresAt 兼容修复**：国内版客户端存的是 ISO 字符串（如 `2026-10-18T12:13:54Z`），上游直接与 `time.time()` 相减会 TypeError；此处统一转 epoch 秒
-2. **安装路径适配**：本机装在 `D:\Qoder CN` 且注册表 InstallLocation 为空，提取脚本按版本目录自动定位 `runtime-info.exe`
+2. **安装路径适配**：国内版可自定义安装路径（如 `D:\Qoder CN`）且注册表 InstallLocation 可能为空，提取脚本按版本目录自动定位 `runtime-info.exe`
 3. **文件名加 `qoder_` 前缀**：与 signin.py 的文件共目录不冲突；凭据文件加入 `.gitignore`
 4. **pythonw 安全**：无控制台（sys.stdout 为 None）下正常工作，异常也强制落日志
 
