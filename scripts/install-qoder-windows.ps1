@@ -100,7 +100,7 @@ try {
         -Action $act1 -Trigger $tri1 -Settings $set1 -Principal $principal `
         -Description "Qoder daily auto checkin (silent, claim idempotent)" -Force | Out-Null
 
-    # Task 2: poll (05/09/13/17/21) - independent Daily triggers, not a repetition
+    # Task 2: poll (11:00/15:00/19:00/23:00) - independent Daily triggers, not a repetition
     # interval: missed repetitions are skipped forever, missed independent
     # triggers are made up on next boot (StartWhenAvailable).
     $tri2 = @()
