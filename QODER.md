@@ -4,20 +4,10 @@
 > WorkBuddy 部分来自 [88lin/workbuddy-auto-signin](https://github.com/88lin/workbuddy-auto-signin)（MIT），其细节见其仓库 README。
 > 用户视角的部署/运维文档在 [qoder-auto-checkin.md](qoder-auto-checkin.md)，三套系统总览见 [README.md](README.md)。
 
-## 一、与上游的关系（git 注意事项）
-
-| 文件 | git 状态 | 说明 |
-|---|---|---|
-| `qoder_checkin.py` / `qoder_extract.py` / `install-qoder-windows.ps1` | untracked | 本地新增，`git pull` 上游更新不会冲突 |
-| `.gitignore` | 本地已修改 | 追加了 qoder 凭据/日志条目；若上游也改了 `.gitignore` 会冲突，**解决时必须保住 qoder_* 与 .qoder_token_cache.json 条目** |
-| `qoder_config.json` / `qoder_accounts.json` / `.qoder_token_cache.json` / `qoder_checkin.log` | ignored | 凭据与运行数据，**绝不提交** |
-
-上游更新 signin.py 后直接 pull 即可；Qoder 部分独立演化，互不影响。
-
-## 二、文件清单与职责
+## 一、文件清单与职责
 
 ```
-qoder_checkin.py          签到主脚本（单文件自包含，纯标准库，~490 行）
+qoder_checkin.py          签到主脚本（单文件自包含，纯标准库）
 qoder_extract.py          凭据提取（DPAPI + AES-GCM + runtime-info.exe，一次性/失效重跑）
 install-qoder-windows.ps1 注册计划任务 QoderAutoSignin + QoderSigninPoll
 qoder_config.json         设备标识（Cosy-*）+ baseUrls + notify + refreshMarginH
@@ -26,9 +16,9 @@ qoder_accounts.json       账号数组（accessToken / refreshToken / expiresAt 
 qoder_checkin.log         运行日志（JSON Lines，每行一次运行）
 ```
 
-改编自 [wallechfox/qoder-checkin](https://github.com/wallechfox/qoder-checkin)（MIT），适配改动见下文「与上游差异」。
+与上游 wallechfox/qoder-checkin 的差异见第六节。凭据与日志文件均在 `.gitignore` 内，绝不提交。
 
-## 三、qoder_checkin.py 代码地图
+## 二、qoder_checkin.py 代码地图
 
 ```
 路径常量          HERE 下 qoder_ 前缀文件（env QODER_CONFIG_FILE / QODER_ACCOUNTS_FILE 可覆盖）
@@ -37,7 +27,7 @@ qoder_checkin.log         运行日志（JSON Lines，每行一次运行）
 HTTP              _raw() 单请求；api_call() 端点轮换：网络错误(0)/404 换下一个 base，
                   其余状态码（含 401）视为该端点已给出结论，记住可用的 _BASE
 过期时间          jwt_exp()（JWT 解 exp，国内版 dt- 令牌非 JWT 恒为 0）
-                  coerce_exp() ★ 修复点：ISO 字符串 / epoch 秒 / epoch 毫秒 → 统一 epoch 秒
+                  coerce_exp()：ISO 字符串 / epoch 秒 / epoch 毫秒 → 统一 epoch 秒
 token 刷新        do_refresh()：POST /api/v1/deviceToken/refresh {"refresh_token": ...}
 持久化            persist()：写缓存 + 回写 accounts.json（token 轮换后不丢）
 账号加载          load_accounts()：env QODER_ACCOUNTS + accounts 文件 → 按 uid/refreshToken 去重 → apply_cache
@@ -61,7 +51,7 @@ token 刷新        do_refresh()：POST /api/v1/deviceToken/refresh {"refresh_to
 | `login_required` | 401 且强刷失败 | 重跑 qoder_extract.py |
 | `error` | HTTP 非 200/401、claim 部分失败、本地异常 | 看 msg 字段定位 |
 
-## 四、qoder_extract.py 解密链路
+## 三、qoder_extract.py 解密链路
 
 ```
 1. 定位数据目录   %APPDATA%\com.qoder.app.* / com.qodercn.app.*（mtime 最新优先；env QODER_AUTH_DIR 可覆盖）
@@ -74,12 +64,13 @@ token 刷新        do_refresh()：POST /api/v1/deviceToken/refresh {"refresh_to
                   → Local State 的 os_crypt.encrypted_key（base64，去 5 字节前缀）
                   → DPAPI CryptUnprotectData（须同一 Windows 用户）得 32 字节 AES 密钥
                   → AES-GCM 解密：nonce=raw[3:15]，密文+tag=raw[15:]（优先 cryptography 库，缺则退回 CNG bcrypt）
-5. expiresAt      coerce_exp() 转 epoch 秒后写入（上游直接写 ISO 字符串会导致签到脚本 TypeError）
+5. expiresAt      coerce_exp() 归一为 epoch 秒后写入（客户端存的是 ISO 字符串，
+                  直接与 time.time() 相减会 TypeError）
 6. 写回           qoder_config.json（补全默认块）+ qoder_accounts.json（按 uid/refreshToken 去重，
                   优先填充空白账号，否则追加）
 ```
 
-## 五、接口契约（逆向所得，改版会失效）
+## 四、接口契约（逆向所得，改版会失效）
 
 均带 `Authorization: Bearer <accessToken>` + `Cosy-ClientType/Cosy-MachineOS/Cosy-MachineHostname/Cosy-MachineId/Cosy-MachineToken/Cosy-MachineCode/Cosy-MachineType/Cosy-Version` 请求头，base 为 `https://openapi.qoder.com.cn`（国际服 `https://openapi.qoder.sh`）。
 
@@ -89,7 +80,7 @@ token 刷新        do_refresh()：POST /api/v1/deviceToken/refresh {"refresh_to
 | `/sash/api/v1/me/campaigns/{cid}/claim` | POST | body `{}`；成功返回 `{status:"CLAIMED", benefit:{amount}}`；**幂等**，重复领不重复发币 |
 | `/api/v1/deviceToken/refresh` | POST | body `{"refresh_token": ...}`；返回 token/accessToken + refreshToken（可能轮换） |
 
-## 六、数据文件格式
+## 五、数据文件格式
 
 ```jsonc
 // qoder_config.json（设备标识由 extract 写入，一般不手改；notify 留空即关闭推送）
@@ -113,15 +104,15 @@ token 刷新        do_refresh()：POST /api/v1/deviceToken/refresh {"refresh_to
  "results": [{"name": "Qoder账号1", "uid": "-", "phase": "already", "msg": "今日已领取", "credits": 0}]}
 ```
 
-## 七、与上游 wallechfox/qoder-checkin 的差异（改动原因）
+## 六、与上游 wallechfox/qoder-checkin 的差异
 
-1. **coerce_exp**：国内客户端 `expiresAt` 是 ISO 字符串，上游与 `time.time()` 直接相减会 TypeError → 统一转 epoch 秒
-2. **安装路径**：客户端可装在自定义路径（如 `D:\Qoder CN`）且注册表 InstallLocation 可能为空 → 提取脚本按版本目录自动定位 runtime-info.exe，无需 QODER_UMID_EXE
-3. **文件名 `qoder_` 前缀**：与上游 signin.py 共目录不冲突
+1. **expiresAt 归一**：国内客户端的 `expiresAt` 是 ISO 字符串，`coerce_exp()` 统一转成 epoch 秒后再参与数值比较
+2. **安装路径**：客户端可装在自定义路径（如 `D:\Qoder CN`）且注册表 InstallLocation 可能为空，提取脚本按版本目录自动定位 runtime-info.exe，无需 QODER_UMID_EXE
+3. **文件名 `qoder_` 前缀**：与同目录的 signin.py / trae 脚本互不冲突
 4. **pythonw 兜底**：stdout/stderr 为 None 时重定向 devnull；顶层异常强制落日志（否则任务被杀当天日志整条丢失）
-5. **单文件**：合并上游 qoder_core.py + 02_checkin.py，减少文件跳转
+5. **单文件**：上游 qoder_core.py + 02_checkin.py 的逻辑合并在一个脚本里，无文件跳转
 
-## 八、维护 runbook
+## 七、维护 runbook
 
 ```powershell
 # 重新提取（LOGIN_REQUIRED 时；须登录 Qoder 的同一 Windows 用户）
@@ -143,3 +134,4 @@ Unregister-ScheduledTask -TaskName "QoderAutoSignin","QoderSigninPoll" -Confirm:
 - 日志 `result` 汇总逻辑在 `log_run`，新增 phase 时记得同步
 - 计划任务触发时间依据「额度每日 10:00（UTC+8）刷新」设计：主签 10:10，轮询 11/15/19/23 点；10:00 前的运行只能看到昨日 CLAIMED 状态，没有意义
 - 计划任务 XML 存 UTC（02:10 = 北京 10:10），核对触发时间别误判
+- 统一部署（`AllAutoCheckin` 调 `qoder_checkin.py silent`）见 [README.md](README.md)，与上面的独立任务并存会多出触发点

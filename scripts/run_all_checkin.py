@@ -135,7 +135,8 @@ def main():
     steps = [
         ("WorkBuddy", [py, os.path.join(HERE, "signin.py"), "silent-poll"], 420, None),
         ("Qoder", [py, os.path.join(HERE, "qoder_checkin.py"), "silent"], 120, None),
-        ("TraeCN", [node, os.path.join(HERE, "trae_checkin_api.mjs"), "--trigger", "schedule"], 120, clean_env()),
+        # TraeCN 服务端繁忙时有退避重试（最长约 90s + 请求耗时），放宽超时
+        ("TraeCN", [node, os.path.join(HERE, "trae_checkin_api.mjs"), "--trigger", "schedule"], 300, clean_env()),
     ]
 
     print("=" * 56)

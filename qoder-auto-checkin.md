@@ -9,7 +9,7 @@
 
 Qoder 没有公开登录接口，token 只存在客户端本地：
 
-1. **提取（一次性）**：`qoder_extract.py` 用 DPAPI 解密 `Local State` 里的 AES 密钥，再 AES-GCM 解密 `%APPDATA%\com.qodercn.app.stable\auth.v1.dat` 得到 token/refreshToken；设备标识由客户端自带 `runtime-info.exe`（`.qoder-versions\0.4.3\resources\umid\`）生成。结果写入 `qoder_config.json` + `qoder_accounts.json`
+1. **提取（一次性）**：`qoder_extract.py` 用 DPAPI 解密 `Local State` 里的 AES 密钥，再 AES-GCM 解密 `%APPDATA%\com.qodercn.app.stable\auth.v1.dat` 得到 token/refreshToken；设备标识由客户端自带 `runtime-info.exe`（`<安装目录>\.qoder-versions\<版本>\resources\umid\`，自动取最新版本目录）生成。结果写入 `qoder_config.json` + `qoder_accounts.json`，`expiresAt` 一律归一为 epoch 秒
 2. **签到（每日）**：`qoder_checkin.py` 带 `Bearer token` + `Cosy-*` 设备头调 `openapi.qoder.com.cn` 的 `/sash/api/v1/me/campaigns` 查活动，有 `CLAIMABLE` 就 POST claim（**幂等**，重复跑不会重复发币）。token 到期前 72h 自动刷新并回写文件
 
 ## 任务总览
@@ -25,7 +25,7 @@ Qoder 没有公开登录接口，token 只存在客户端本地：
 - **错过补跑**：`StartWhenAvailable=true`，关机/睡眠错过的时点开机后补跑
 - **静默运行**：`pythonw.exe` 无窗口；每次运行追加一行 JSON 到 `qoder_checkin.log`
 - **防重复**：`MultipleInstancesPolicy=IgnoreNew`
-- **轮询用 5 个独立 Daily 触发器**（非重复间隔）：重复间隔错过会被永久跳过，独立触发器才会补跑（同 WorkBuddy 安装脚本注释里的经验）
+- **轮询用 4 个独立 Daily 触发器**（11/15/19/23 点，非重复间隔）：重复间隔错过会被永久跳过，独立触发器配合 `StartWhenAvailable` 才会补跑
 
 ## 首次部署 / 重新提取
 
@@ -82,15 +82,8 @@ Disable-ScheduledTask -TaskName "QoderAutoSignin"
 Disable-ScheduledTask -TaskName "QoderSigninPoll"
 ```
 
-## 相对上游项目的改动
-
-1. **expiresAt 兼容修复**：国内版客户端存的是 ISO 字符串（如 `2026-10-18T12:13:54Z`），上游直接与 `time.time()` 相减会 TypeError；此处统一转 epoch 秒
-2. **安装路径适配**：国内版可自定义安装路径（如 `D:\Qoder CN`）且注册表 InstallLocation 可能为空，提取脚本按版本目录自动定位 `runtime-info.exe`
-3. **文件名加 `qoder_` 前缀**：与 signin.py 的文件共目录不冲突；凭据文件加入 `.gitignore`
-4. **pythonw 安全**：无控制台（sys.stdout 为 None）下正常工作，异常也强制落日志
-
 ## 已知坑
 
-1. **任务 XML 里时间是 UTC**：`StartBoundary` 显示 16:10 对应北京时间 00:10，核对时别误判
+1. **任务 XML 里时间是 UTC**：`StartBoundary` 存 UTC，如 `02:10` 对应北京时间 10:10，核对时别误判
 2. **凭据文件绝不能提交 git**：`qoder_accounts.json` 是有效登录凭据，已在 `.gitignore` 中；改动 `.gitignore` 前务必确认这几条还在
 3. **客户端升级可能使接口失效**：签到接口是逆向所得，Qoder 改版可能需要重新适配（上游仓库会跟进）

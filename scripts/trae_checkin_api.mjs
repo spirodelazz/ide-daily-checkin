@@ -161,31 +161,45 @@ async function main() {
   }
 
   console.log('[INFO] 领取签到...');
-  let cl;
-  try {
-    cl = await call('/trae/api/v2/ug/checkin_credits/claim');
-  } catch (e) {
-    console.log('❌ 网络失败:', e.message);
-    logRun({ result: 'ERROR', msg: 'claim 网络失败: ' + e.message, uid: info.userId });
-    return 1;
+  // 服务端高峰限流会返回 HTTP 200 + code!=0 + "当前参与用户太多，请稍后再试"，
+  // 属于临时性繁忙而非真失败，做有界退避重试（15s/30s/45s）
+  const BUSY_RE = /用户太多|稍后再试|too many|busy|rate limit/i;
+  const MAX_ATTEMPTS = 4;
+  let cl = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      cl = await call('/trae/api/v2/ug/checkin_credits/claim');
+    } catch (e) {
+      console.log('❌ 网络失败:', e.message);
+      logRun({ result: 'ERROR', msg: 'claim 网络失败: ' + e.message, uid: info.userId });
+      return 1;
+    }
+    if (cl.http === 401 || cl.http === 403) {
+      console.log('🔑 鉴权失效（HTTP', cl.http + '）');
+      logRun({ result: 'LOGIN_REQUIRED', msg: `claim HTTP ${cl.http}`, uid: info.userId });
+      return 3;
+    }
+    if (cl.http === 200 && cl.body && cl.body.code === 0) {
+      console.log('✅ 签到成功 +200 Credits');
+      logRun({ result: 'CLAIMED', msg: '签到成功 +200 Credits', uid: info.userId, credits: 200, response: cl.body });
+      return 0;
+    }
+    const msg = cl.body?.message || cl.text;
+    if (/已签|already|checked/i.test(msg)) {
+      console.log('☑️ 今日已签（领取接口返回幂等结果）');
+      logRun({ result: 'ALREADY', msg, uid: info.userId });
+      return 2;
+    }
+    if (BUSY_RE.test(msg) && attempt < MAX_ATTEMPTS) {
+      const wait = 15 * attempt;
+      console.log(`⏳ 服务端繁忙（${msg}），${wait}s 后重试（重试 ${attempt}/${MAX_ATTEMPTS - 1}）`);
+      logRun({ result: 'RETRY', msg: `claim 繁忙: ${msg}，${wait}s 后重试`, uid: info.userId, attempt });
+      await new Promise(r => setTimeout(r, wait * 1000));
+      continue;
+    }
+    break;
   }
-  if (cl.http === 401 || cl.http === 403) {
-    console.log('🔑 鉴权失效（HTTP', cl.http + '）');
-    logRun({ result: 'LOGIN_REQUIRED', msg: `claim HTTP ${cl.http}`, uid: info.userId });
-    return 3;
-  }
-  if (cl.http === 200 && cl.body && cl.body.code === 0) {
-    console.log('✅ 签到成功 +200 Credits');
-    logRun({ result: 'CLAIMED', msg: '签到成功 +200 Credits', uid: info.userId, credits: 200, response: cl.body });
-    return 0;
-  }
-  // code 非 0：可能是"已签"等幂等返回，也可能真失败
   const msg = cl.body?.message || cl.text;
-  if (/已签|already|checked/i.test(msg)) {
-    console.log('☑️ 今日已签（领取接口返回幂等结果）');
-    logRun({ result: 'ALREADY', msg, uid: info.userId });
-    return 2;
-  }
   console.log('❌ 领取失败: HTTP', cl.http, cl.text);
   logRun({ result: 'ERROR', msg: `claim HTTP ${cl.http} ${msg}`, uid: info.userId });
   return 1;

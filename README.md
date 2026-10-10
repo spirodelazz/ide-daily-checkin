@@ -78,8 +78,8 @@ Unregister-ScheduledTask -TaskName "AllAutoCheckin" -Confirm:$false
 | `AllAutoCheckin` | 每天 **10:20**（主跑）+ **15:00 / 20:30**（兜底） | `pythonw run_all_checkin.py` 顺序跑三套 | 15 分钟 |
 
 - **主跑选 10:20 的原因**：Qoder 额度 10:00（UTC+8）刷新后立即可领；WorkBuddy / Trae 当天任意时间签均有效
-- 顺序执行、单系统超时隔离（WB 420s / Qoder 120s / Trae 120s），任一失败不影响其余
-- 日志：**`all_checkin.log` 是唯一需要查看的文件**——每次运行先汇入三套各自的新增明细行（`script` 字段区分归属），最后一行是 `run_all_checkin` 汇总；`signin.log` / `qoder_checkin.log` / `trae_checkin.log` 保留为脚本原生日志（上游兼容），日常无需查看
+- 顺序执行、单系统超时隔离（WB 420s / Qoder 120s / Trae 300s——Trae 服务端繁忙时脚本会退避重试），任一失败不影响其余
+- 日志：**`all_checkin.log` 是唯一需要查看的文件**——每次运行先汇入三套各自的新增明细行（`script` 字段区分归属），最后一行是 `run_all_checkin` 汇总；`signin.log` / `qoder_checkin.log` / `trae_checkin.log` 是各脚本的原生输出，日常无需查看
 - 手动立即跑一次：`Start-ScheduledTask -TaskName 'AllAutoCheckin'`，或前台 `python scripts\run_all_checkin.py`
 - 注意：WorkBuddy 的 `silent-poll` 空跑（当天已签且成长中心无事可做）不落明细行，但汇总行始终存在
 
@@ -88,13 +88,15 @@ Unregister-ScheduledTask -TaskName "AllAutoCheckin" -Confirm:$false
 不想三合一，也可以按系统分别注册独立任务：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1        # WorkBuddy × 2 任务
 powershell -ExecutionPolicy Bypass -File scripts\install-qoder-windows.ps1  # Qoder × 2 任务
 powershell -ExecutionPolicy Bypass -File scripts\install-trae-windows.ps1   # Trae × 2 任务
 ```
 
+WorkBuddy 的独立任务由上游仓库的 `install-windows.ps1` 注册（本仓库只收录 `scripts\signin.py`，任务配置见 [workbuddy-scheduled-tasks.md](workbuddy-scheduled-tasks.md)）。
+
 > [!WARNING]
 > 独立部署与统一任务**二选一**，同时安装会造成重复触发点（好在全部幂等，不会重复发币）。
+> `install-all-checkin.ps1` 默认注销六个单系统任务后注册统一任务；加 `-KeepExisting` 可保留已有任务。
 
 ### 公共设计约定（改动前先读）
 
