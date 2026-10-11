@@ -73,6 +73,10 @@ Unregister-ScheduledTask -TaskName "TraeAutoSignin","TraeSigninPoll" -Confirm:$f
 
 1. **ELECTRON_RUN_AS_NODE**：从 WorkBuddy / VS Code 等 Electron 宿主的终端里手动运行时，
    该环境变量会让 Trae 以纯 Node 模式启动（CDP 版受影响；纯 API 版不启动 Trae，不受影响）
-2. **token 续期依赖 Trae 运行**：约每 2 周内至少启动一次 Trae CN；日志出现 `LOGIN_REQUIRED` 时打开一次即可
+2. **x-device-id 必须用真实设备号**：claim 接口校验设备号，须取 storage.json 键名
+   `iCubeAuthInfo://icube-dc:<纯数字>` 中的数字。用 `telemetry.devDeviceId`（UUID 格式）会被
+   服务端拒绝，返回 `code:9074 "当前参与用户太多，请稍后再试"`——该文案有误导性，实为设备校验不通过
+3. **token 续期依赖 Trae 运行**：约每 2 周内至少启动一次 Trae CN；日志出现 `LOGIN_REQUIRED` 时打开一次即可
 3. **任务 XML 存 UTC**：16:20 = 北京 00:20、04:00 = 北京 12:00
 4. Trae 更新若更换加密方案（魔数头变化）或接口路径，脚本会明确报"信封魔数不匹配"——需重新逆向
+5. 脚本遇到 9074 会退避重试；但若连续多轮全天候 9074，应优先排查设备号是否有效（见坑 2），而非当作服务端拥堵

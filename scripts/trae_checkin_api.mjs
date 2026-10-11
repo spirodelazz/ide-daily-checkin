@@ -95,10 +95,17 @@ async function main() {
   console.log(`[INFO] token ${mask(info.token)} 到期 ${info.expiredAt}${expired ? '（已过期）' : ''}`);
   console.log(`[INFO] host ${info.host} | userId ${info.userId}`);
 
+  // x-device-id 必须是客户端真实注册的纯数字设备号（键名 iCubeAuthInfo://icube-dc:<digits>）。
+  // 不能用 telemetry.devDeviceId（UUID 格式会被服务端拒绝，返回 9074"当前参与用户太多"——
+  // 该文案具有误导性，实际是设备校验不通过，2026-10 起 Trae 收紧了此校验）
+  const STORAGE = JSON.parse(fs.readFileSync(path.join(os.homedir(), 'AppData', 'Roaming', 'Trae CN', 'User', 'globalStorage', 'storage.json'), 'utf-8'));
+  const dcKey = Object.keys(STORAGE).find(k => k.toLowerCase().startsWith('icubeauthinfo://icube-dc:'));
+  const deviceId = dcKey ? dcKey.split(':').pop() : '';
+  if (!/^\d{12,20}$/.test(deviceId)) throw new Error('未能从 storage.json 提取真实设备号（iCubeAuthInfo://icube-dc:*）');
   const headers = {
     'Content-Type': 'application/json',
     'Authorization': `Cloud-IDE-JWT ${info.token}`,
-    'x-device-id': String(JSON.parse(fs.readFileSync(path.join(os.homedir(), 'AppData', 'Roaming', 'Trae CN', 'User', 'globalStorage', 'storage.json'), 'utf-8'))['telemetry.devDeviceId'] || ''),
+    'x-device-id': deviceId,
   };
 
   const call = async (ep) => {
