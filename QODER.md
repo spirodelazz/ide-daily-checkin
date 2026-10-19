@@ -78,7 +78,7 @@ token 刷新        do_refresh()：POST /api/v1/deviceToken/refresh {"refresh_to
 |---|---|---|
 | `/sash/api/v1/me/campaigns` | GET | 活动列表：`{campaigns:[{campaignId, name, actionType, claimStatus, benefit:{amount}, startAt, endAt}]}`；只关心 `actionType=CLAIM_BENEFIT` 且 `claimStatus=CLAIMABLE` |
 | `/sash/api/v1/me/campaigns/{cid}/claim` | POST | body `{}`；成功返回 `{status:"CLAIMED", benefit:{amount}}`；**幂等**，重复领不重复发币 |
-| `/api/v1/deviceToken/refresh` | POST | body `{"refresh_token": ...}`；返回 token/accessToken + refreshToken（可能轮换） |
+| `/api/v1/deviceToken/refresh` | POST | body `{"refresh_token": ...}`；返回 `device_token` + `refresh_token`（可能轮换）+ `expires_at`（ISO 字符串） |
 
 ## 五、数据文件格式
 

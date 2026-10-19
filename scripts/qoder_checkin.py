@@ -259,11 +259,13 @@ def do_refresh(refresh_token):
     status, data, _ = api_call(PATH_REFRESH, "POST", body={"refresh_token": refresh_token})
     if status != 200 or not isinstance(data, dict):
         return None
-    tok = data.get("token") or data.get("accessToken") or data.get("access_token")
+    tok = (data.get("token") or data.get("accessToken") or data.get("access_token")
+           or data.get("device_token"))
     if not tok:
         return None
     return {"accessToken": tok,
-            "refreshToken": data.get("refreshToken") or data.get("refresh_token") or refresh_token}
+            "refreshToken": data.get("refreshToken") or data.get("refresh_token") or refresh_token,
+            "expiresAt": coerce_exp(data.get("expires_at") or data.get("expiresAt"))}
 
 
 # ── 账号持久化（轮换后的 token 写回文件，避免越用越失效）──
@@ -281,7 +283,7 @@ def _acct_key(acc):
             or "default")
 
 
-def persist(acc):
+def persist(acc, prev_rt=""):
     key = _acct_key(acc)
     cache = read_json(CACHE_FILE, {})
     if not isinstance(cache, dict):
@@ -296,10 +298,10 @@ def persist(acc):
     except Exception as e:
         print("⚠️ [缓存] 写入失败: %s" % e)
     if os.path.isfile(ACCOUNTS_FILE):
-        _write_back_accounts(acc)
+        _write_back_accounts(acc, prev_rt)
 
 
-def _write_back_accounts(acc):
+def _write_back_accounts(acc, prev_rt=""):
     try:
         doc = read_json(ACCOUNTS_FILE, None)
         accounts = doc.get("accounts") if isinstance(doc, dict) else doc
@@ -310,7 +312,8 @@ def _write_back_accounts(acc):
             if not isinstance(a, dict):
                 continue
             same = (acc.get("uid") and str(a.get("uid")) == str(acc["uid"])) or \
-                   (acc.get("refreshToken") and a.get("refreshToken") == acc.get("refreshToken"))
+                   (acc.get("refreshToken") and a.get("refreshToken") == acc.get("refreshToken")) or \
+                   (prev_rt and a.get("refreshToken") == prev_rt)
             if same:
                 a["accessToken"] = acc.get("accessToken", "")
                 a["refreshToken"] = acc.get("refreshToken", "")
@@ -410,10 +413,10 @@ def ensure_token(acc, force=False):
         return False, "refreshToken 刷新失败，需重新运行 qoder_extract.py 提取"
     acc["accessToken"] = r["accessToken"]
     acc["refreshToken"] = r["refreshToken"]
-    acc["expiresAt"] = jwt_exp(r["accessToken"])
+    acc["expiresAt"] = r.get("expiresAt") or jwt_exp(r["accessToken"])
     if not acc.get("uid"):
         acc["uid"] = jwt_uid(r["accessToken"])
-    persist(acc)
+    persist(acc, prev_rt=rt)
     return True, "已刷新"
 
 

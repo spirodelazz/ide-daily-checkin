@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-19
+
+### Fixed
+
+- Qoder 签到自 10-18 20:30 起 `login_required`：刷新接口返回结构变更（`token/accessToken/refreshToken` → `device_token`/`refresh_token`/`expires_at`），`do_refresh` 按旧字段解析失败
+- `ensure_token` 此前刷新成功后用 `jwt_exp` 取到期时间，国内 `dt-` 令牌非 JWT 恒为 0，现优先取刷新响应的 `expires_at`
+- refreshToken 轮换时 `persist` 回写匹配失效（新 rt 对文件内旧 rt 永不相等、国内账号 uid 为空）：`persist` 增加 `prev_rt` 参数按刷新前的 rt 匹配回写
+
 ## 2026-10-17
 
 ### Added
