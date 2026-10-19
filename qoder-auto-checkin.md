@@ -1,3 +1,9 @@
+---
+doc-type: how-to
+reader: 在 Windows 上部署、排查或卸载 Qoder 每日签到的人
+asof: 2026-10-17
+---
+
 # Qoder 每日自动签到（Windows 任务计划程序）
 
 > Qoder 签到系统详情：原理、单系统独立部署（可选）、排障与卸载。

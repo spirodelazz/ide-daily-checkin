@@ -1,3 +1,9 @@
+---
+doc-type: how-to
+reader: 在 Windows 上部署、排查或卸载 Trae CN 每日签到的人
+asof: 2026-10-17
+---
+
 # Trae CN 每日自动签到（纯 API，无需启动客户端）
 
 > 参考 [BlueChonk/trae-daily-checkin](https://github.com/BlueChonk/trae-daily-checkin)（CDP 模拟点击方案），本项目采用**纯 API 方案**（对 Trae CN 逆向所得）：不启动 Trae 窗口、不依赖 GUI。

@@ -1,3 +1,9 @@
+---
+doc-type: how-to
+reader: 查看、修改或卸载 WorkBuddy 本地定时任务的人
+asof: 2026-10-17
+---
+
 # WorkBuddy 本地定时任务（Windows 任务计划程序）
 
 > WorkBuddy 签到系统详情：任务配置、查看方式与卸载方法。
