@@ -48,6 +48,7 @@ signin.py silent-poll
   5. 每 20 秒复探一次（最多 3 次），天数大于基线即成功，写入 `.streak_state.json`
   6. 仍未记账则整套重来一次；两次都失败退出码 3，明细在 `scripts\streak_launch.log`
 - 隐藏用 `ShowWindowAsync(hwnd, 0)`；App 自带 closeToTray，托盘图标或再次双击 `WorkBuddy.exe` 可唤回窗口
+- 拉起用 `ProcessStartInfo(UseShellExecute=false, CreateNoWindow=true)` 分离启动，不用 `Start-Process`：后者让客户端继承任务进程的标准句柄，客户端及其控制台子进程会挂在任务计划程序那个隐藏控制台上——脚本退出后窗口不消失，还被客户端日志持续刷屏
 - 强制结束进程会让客户端在 `~/.workbuddy/logs/Crash-Log/` 留一条 `crash-report-daemon-*.json`（sidecar 以 `exitCode=-1` 退出），属重启的预期副作用，不代表客户端异常
 - 手动预演（不结束进程、不拉起客户端）：`powershell -ExecutionPolicy Bypass -File scripts\workbuddy_streak_launch.ps1 -DryRun`
 - 冒烟自检（真重启一轮，但不判断天数、不写状态、结束时保留窗口）：`powershell -ExecutionPolicy Bypass -File scripts\workbuddy_streak_launch.ps1 -MechanicsTest`

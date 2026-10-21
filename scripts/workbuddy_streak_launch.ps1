@@ -144,10 +144,28 @@ function Stop-WorkBuddy {
     Start-Sleep -Seconds 8
 }
 
+# 不用 Start-Process：它让客户端继承调用方的标准句柄，客户端及其控制台子进程会挂在
+# 任务计划程序那个隐藏控制台上 —— 窗口不随脚本退出而消失，且被客户端日志持续刷屏。
+# 这里显式 CreateNoWindow 且不重定向（.NET 不重定向时 bInheritHandles=false），
+# 既不留控制台窗口，也不影响 GUI 窗口正常显示。
+function Start-Detached([string]$path) {
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $path
+        $psi.WorkingDirectory = Split-Path -Parent $path
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        [void][System.Diagnostics.Process]::Start($psi)
+    } catch {
+        Write-Log ('⚠️ 分离式启动失败，回退 Start-Process: {0}' -f $_.Exception.Message)
+        Start-Process -FilePath $path
+    }
+}
+
 function Start-WorkBuddy {
     Write-Log ("拉起客户端: {0}" -f $exe)
     if ($DryRun) { return [IntPtr]::Zero }
-    Start-Process -FilePath $exe
+    Start-Detached $exe
     $hwnd = [IntPtr]::Zero
     $loops = [int]($WINDOW_WAIT_SEC * 2)
     for ($i = 0; $i -lt $loops; $i++) {
