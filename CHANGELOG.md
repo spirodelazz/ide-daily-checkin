@@ -7,7 +7,8 @@
 - 成长中心连签守卫形同虚设：客户端每天 03:02 自我重启后常驻，10:00 时 `Get-Process WorkBuddy` 必然命中，脚本直接 `exit 0` 什么都没做（`AppStartup.log` 里自 10-09 起没有任何 10:00 前后的启动记录）。2026-10-20 因当天没有真实登录，连签停在 19 天后归零
 - `workbuddy_streak_launch.ps1` 改为「校验 → 重启 → 复核」：先读 `.streak_state.json` 判断当天是否已复核，再用 `probe_streak.py --days` 取基线，未记账则结束旧进程重新拉起、窗口保持可见 60 秒、每 20 秒复探最多 3 次，天数增长才写入状态；整套最多重来一次，失败退出码 3
 - 主实例启动不足 3 分钟时先等 90 秒再接手，避免与登录握手抢跑；辅助/CLI 子进程的启动时间不再参与判断
-- 拉起客户端改用分离式启动（`UseShellExecute=false` + `CreateNoWindow=true`）：`Start-Process` 会让客户端继承任务进程的标准句柄，客户端及其控制台子进程挂在任务计划程序的隐藏控制台上，脚本退出后控制台窗口不消失且被客户端日志持续刷屏
+- 拉起客户端改用分离式启动（`UseShellExecute=false` + `CreateNoWindow=true`）：`Start-Process` 会让客户端继承任务进程的标准句柄，客户端及其控制台子进程挂在任务计划程序的隐藏控制台上，脚本退出后控制台窗口不消失且被客户端日志持续刷屏；关掉该窗口会以 `STATUS_CONTROL_C_EXIT` 连带杀掉客户端
+- 任务宿主由 `powershell.exe` 换成 `pythonw.exe`（`workbuddy_streak_launch.pyw` 转调守卫脚本）：前者是控制台程序，`-WindowStyle Hidden` 只在窗口创建后隐藏，启动瞬间仍会闪黑框；`pythonw.exe` 无控制台，再用 `CREATE_NO_WINDOW` 起 PowerShell，实测该子进程连隐藏的控制台窗口都没有
 - `WorkBuddyStreakLaunch` 任务时限 10 → 15 分钟（两次尝试需要更长时间），同步更新任务描述
 
 ### Added
@@ -15,6 +16,7 @@
 - `workbuddy_streak_launch.ps1 -DryRun`：只输出判定与日志，不结束进程、不拉起客户端
 - `workbuddy_streak_launch.ps1 -MechanicsTest`：真重启一轮，只验证「结束进程 → 拉起 → 窗口出现 → 探针可读」，不判断天数、不写 state，结束后保留窗口便于观察
 - `probe_streak.py --days`：只输出 `days=<n>` 供守卫脚本解析，读取失败为 `days=-1` 且退出码 1
+- `workbuddy_streak_launch.pyw`：无控制台启动器，任务计划程序以 `pythonw.exe` 运行它，退出码沿用守卫脚本的返回值
 - `scripts\streak_launch.log`：守卫的判定、重启、复核明细
 
 ### Notes

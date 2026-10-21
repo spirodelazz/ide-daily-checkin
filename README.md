@@ -90,7 +90,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install-trae-windows.ps1
 | 任务名 | 触发（北京时间） | 内容 |
 | --- | --- | --- |
 | `AllAutoCheckin` | 10:20 主跑，15:00 / 20:30 兜底 | 顺序跑三套签到，时限 15 分钟 |
-| `WorkBuddyStreakLaunch` | 每天 10:00 | 校验成长中心当天是否已记账，未记账则结束旧进程并重新拉起客户端，探针复核通过才收工；时限 15 分钟 |
+| `WorkBuddyStreakLaunch` | 每天 10:00 | 校验成长中心当天是否已记账，未记账则结束旧进程并重新拉起客户端，探针复核通过才收工；时限 15 分钟。宿主为 `pythonw.exe`，全程不弹控制台 |
 
 几条设计约定：主跑选 10:20 是因为 Qoder 额度在 10:00（UTC+8）刷新；轮询用多个独立 Daily 触发器而非「重复间隔」（后者错过会永久跳过）；`StartWhenAvailable` 补跑、`IgnoreNew` 防重复实例。任务在任务计划程序中默认为隐藏，需「查看 → 显示隐藏的任务」；任务 XML 里时间是 **UTC**。
 
@@ -103,6 +103,7 @@ ide-daily-checkin/
 │   ├── install-all-checkin.ps1      注册统一任务
 │   ├── signin.py                    WorkBuddy 签到
 │   ├── workbuddy_streak_launch.ps1  连签守卫
+│   ├── workbuddy_streak_launch.pyw  无控制台启动器（任务宿主）
 │   ├── probe_streak.py              连签状态探针（只读）
 │   ├── qoder_checkin.py             Qoder 签到
 │   ├── qoder_extract.py             Qoder 凭据提取

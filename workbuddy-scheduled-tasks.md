@@ -31,7 +31,7 @@ signin.py silent-poll
 |---|---|---|---|---|
 | `WorkBuddyAutoSignin` | 每日自动签到（静默、零 token） | 每天 **00:05** | `pythonw.exe signin.py silent` | 10 分钟 |
 | `WorkBuddyGrowthPoll` | 轮询（补签 + 成长中心） | 每天 **01/05/09/13/17/21** 点 | `pythonw.exe signin.py silent-poll` | 5 分钟 |
-| `WorkBuddyStreakLaunch` | 每天真实登录一次，保成长中心连签 | 每天 **10:00** | `powershell.exe workbuddy_streak_launch.ps1` | 15 分钟 |
+| `WorkBuddyStreakLaunch` | 每天真实登录一次，保成长中心连签 | 每天 **10:00** | `pythonw.exe workbuddy_streak_launch.pyw` | 15 分钟 |
 
 ### WorkBuddyStreakLaunch（连签守卫）
 
@@ -48,14 +48,15 @@ signin.py silent-poll
   5. 每 20 秒复探一次（最多 3 次），天数大于基线即成功，写入 `.streak_state.json`
   6. 仍未记账则整套重来一次；两次都失败退出码 3，明细在 `scripts\streak_launch.log`
 - 隐藏用 `ShowWindowAsync(hwnd, 0)`；App 自带 closeToTray，托盘图标或再次双击 `WorkBuddy.exe` 可唤回窗口
-- 拉起用 `ProcessStartInfo(UseShellExecute=false, CreateNoWindow=true)` 分离启动，不用 `Start-Process`：后者让客户端继承任务进程的标准句柄，客户端及其控制台子进程会挂在任务计划程序那个隐藏控制台上——脚本退出后窗口不消失，还被客户端日志持续刷屏
+- 任务的宿主是 `pythonw.exe`（GUI 子系统，自身无控制台），由 `scripts\workbuddy_streak_launch.pyw` 用 `CREATE_NO_WINDOW` 起 PowerShell：直接让任务计划程序起 `powershell.exe` 时，`-WindowStyle Hidden` 只能隐藏已经创建的窗口，启动瞬间仍会闪一下黑框，而 `CREATE_NO_WINDOW` 连控制台窗口都不分配
+- 拉起用 `ProcessStartInfo(UseShellExecute=false, CreateNoWindow=true)` 分离启动，不用 `Start-Process`：后者让客户端继承任务进程的标准句柄，客户端及其控制台子进程会挂在任务进程那个控制台上——脚本退出后窗口不消失，还被客户端日志持续刷屏（关掉该窗口会以 `STATUS_CONTROL_C_EXIT` 连带杀掉客户端）
 - 强制结束进程会让客户端在 `~/.workbuddy/logs/Crash-Log/` 留一条 `crash-report-daemon-*.json`（sidecar 以 `exitCode=-1` 退出），属重启的预期副作用，不代表客户端异常
 - 手动预演（不结束进程、不拉起客户端）：`powershell -ExecutionPolicy Bypass -File scripts\workbuddy_streak_launch.ps1 -DryRun`
 - 冒烟自检（真重启一轮，但不判断天数、不写状态、结束时保留窗口）：`powershell -ExecutionPolicy Bypass -File scripts\workbuddy_streak_launch.ps1 -MechanicsTest`
-- 注册命令（`<仓库路径>` 换成本仓库实际位置）：
+- 注册命令（`<仓库路径>` 换成实际位置，`<pythonw>` 换成 `pythonw.exe` 的绝对路径）：
 
 ```powershell
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "<仓库路径>\scripts\workbuddy_streak_launch.ps1"'
+$action = New-ScheduledTaskAction -Execute '<pythonw>' -Argument '"<仓库路径>\scripts\workbuddy_streak_launch.pyw"'
 $trigger = New-ScheduledTaskTrigger -Daily -At 10:00
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
 Register-ScheduledTask -TaskName 'WorkBuddyStreakLaunch' -Action $action -Trigger $trigger -Settings $settings -Force
@@ -128,6 +129,7 @@ Get-Content scripts\streak_launch.log -Tail 20
 |---|---|
 | `scripts\signin.py` | 主脚本（签到 + 成长中心轮询逻辑），收录自上游 [88lin/workbuddy-auto-signin](https://github.com/88lin/workbuddy-auto-signin)（MIT） |
 | `scripts\workbuddy_streak_launch.ps1` | 连签守卫：校验当天是否记账 → 结束旧进程 → 重新拉起并保留窗口 60 秒 → 探针复核 → 记录状态 |
+| `scripts\workbuddy_streak_launch.pyw` | 无控制台启动器：任务计划程序用它当宿主，再以 `CREATE_NO_WINDOW` 起 PowerShell |
 | `scripts\probe_streak.py` | 只读探针：查询成长中心连签状态（`/v2/activity/growth/streak`），`--days` 输出供脚本解析 |
 | `scripts\.streak_state.json` | 守卫状态文件：记录最近一次复核通过的日期与连签天数（本地生成，不入库） |
 | `scripts\streak_launch.log` | 守卫运行日志（每次判定、重启、复核结果各一行） |
