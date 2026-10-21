@@ -1,7 +1,7 @@
 ---
 doc-type: how-to
 reader: 查看、修改或卸载 WorkBuddy 本地定时任务的人
-asof: 2026-10-17
+asof: 2026-10-21
 ---
 
 # WorkBuddy 本地定时任务（Windows 任务计划程序）
@@ -31,21 +31,32 @@ signin.py silent-poll
 |---|---|---|---|---|
 | `WorkBuddyAutoSignin` | 每日自动签到（静默、零 token） | 每天 **00:05** | `pythonw.exe signin.py silent` | 10 分钟 |
 | `WorkBuddyGrowthPoll` | 轮询（补签 + 成长中心） | 每天 **01/05/09/13/17/21** 点 | `pythonw.exe signin.py silent-poll` | 5 分钟 |
-| `WorkBuddyStreakLaunch` | 拉起客户端，保成长中心连签 | 每天 **10:00** | `powershell.exe workbuddy_streak_launch.ps1` | 10 分钟 |
+| `WorkBuddyStreakLaunch` | 每天真实登录一次，保成长中心连签 | 每天 **10:00** | `powershell.exe workbuddy_streak_launch.ps1` | 15 分钟 |
 
 ### WorkBuddyStreakLaunch（连签守卫）
 
-成长中心"连签"只认桌面客户端当天的登录行为，`signin.py` 调 API 无法代替，由该任务每天拉起客户端记上这一天。
+成长中心"连签"只认桌面客户端当天的**一次真实登录**：客户端每天 03:02 自我重启一次后常驻，常驻进程与后台自启都不记账，`signin.py` 调 API 也无法代替（`/v2/activity/growth/` 下没有登录上报接口）。
 
-- 每天 **10:00** 触发，`StartWhenAvailable=true`（关机错过则开机补跑）
-- 守卫脚本 `scripts\workbuddy_streak_launch.ps1`：客户端已在运行则直接退出，不会重复拉起；未运行才拉起，并在主窗口出现后将其隐藏到后台（App 自带 closeToTray 支持，托盘图标可恢复，再次双击 WorkBuddy.exe 也可唤回窗口）
-- 不带 `-Hidden` 属性，任务计划程序中默认可见
+守卫每天 10:00 校验当天是否已记账，未记账就结束旧进程、重新拉起、让窗口可见 60 秒，再用探针复核天数是否增长；复核通过才把当天写入状态文件，因此一天最多折腾一次。
+
+- 触发：每天 **10:00**，`StartWhenAvailable=true`（关机错过则开机补跑），时限 15 分钟
+- 判定与执行顺序：
+  1. `scripts\.streak_state.json` 记录的日期是今天 → 直接退出（当天已复核）
+  2. `probe_streak.py --days` 读连签基线（读不到则本轮只保证"起来一次"）
+  3. 主实例启动不足 3 分钟时先等 90 秒，避免和登录握手抢跑；随后结束所有 `WorkBuddy` 进程
+  4. 拉起客户端，主窗口出现后**保持可见 60 秒**（等首页加载与登录上报），再隐藏到托盘
+  5. 每 20 秒复探一次（最多 3 次），天数大于基线即成功，写入 `.streak_state.json`
+  6. 仍未记账则整套重来一次；两次都失败退出码 3，明细在 `scripts\streak_launch.log`
+- 隐藏用 `ShowWindowAsync(hwnd, 0)`；App 自带 closeToTray，托盘图标或再次双击 `WorkBuddy.exe` 可唤回窗口
+- 强制结束进程会让客户端在 `~/.workbuddy/logs/Crash-Log/` 留一条 `crash-report-daemon-*.json`（sidecar 以 `exitCode=-1` 退出），属重启的预期副作用，不代表客户端异常
+- 手动预演（不结束进程、不拉起客户端）：`powershell -ExecutionPolicy Bypass -File scripts\workbuddy_streak_launch.ps1 -DryRun`
+- 冒烟自检（真重启一轮，但不判断天数、不写状态、结束时保留窗口）：`powershell -ExecutionPolicy Bypass -File scripts\workbuddy_streak_launch.ps1 -MechanicsTest`
 - 注册命令（`<仓库路径>` 换成本仓库实际位置）：
 
 ```powershell
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "<仓库路径>\scripts\workbuddy_streak_launch.ps1"'
 $trigger = New-ScheduledTaskTrigger -Daily -At 10:00
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
 Register-ScheduledTask -TaskName 'WorkBuddyStreakLaunch' -Action $action -Trigger $trigger -Settings $settings -Force
 ```
 
@@ -100,6 +111,12 @@ Get-Content scripts\signin.log -Tail 5
 
 # 查成长中心连签状态（连签天数 / 补登卡余额 / 可补日期）
 python scripts\probe_streak.py
+
+# 只看连签天数（守卫脚本内部用的形式）
+python scripts\probe_streak.py --days
+
+# 连签守卫的判定与复核过程
+Get-Content scripts\streak_launch.log -Tail 20
 ```
 
 日志每行一条 JSON，关键字段：`result`（CLAIMED=签到成功 / ALREADY=已签过）、`streak_days` 连续天数、`total_credits` 累计积分、`trigger: "poll"` 表示由轮询任务触发。
@@ -109,8 +126,10 @@ python scripts\probe_streak.py
 | 路径 | 说明 |
 |---|---|
 | `scripts\signin.py` | 主脚本（签到 + 成长中心轮询逻辑），收录自上游 [88lin/workbuddy-auto-signin](https://github.com/88lin/workbuddy-auto-signin)（MIT） |
-| `scripts\workbuddy_streak_launch.ps1` | 连签守卫脚本：客户端未运行才拉起，拉起后隐藏主窗口到后台 |
-| `scripts\probe_streak.py` | 调试探针：只读查询成长中心连签状态（`/v2/activity/growth/streak`） |
+| `scripts\workbuddy_streak_launch.ps1` | 连签守卫：校验当天是否记账 → 结束旧进程 → 重新拉起并保留窗口 60 秒 → 探针复核 → 记录状态 |
+| `scripts\probe_streak.py` | 只读探针：查询成长中心连签状态（`/v2/activity/growth/streak`），`--days` 输出供脚本解析 |
+| `scripts\.streak_state.json` | 守卫状态文件：记录最近一次复核通过的日期与连签天数（本地生成，不入库） |
+| `scripts\streak_launch.log` | 守卫运行日志（每次判定、重启、复核结果各一行） |
 | 上游仓库根目录 `install-windows.ps1` | 注册上游两个任务的安装脚本，未收录进本仓库 |
 | `scripts\signin.log` | 运行日志（统一任务会把新增行汇入 `all_checkin.log`） |
 | `C:\Windows\System32\Tasks\WorkBuddyAutoSignin` / `...\WorkBuddyGrowthPoll` / `...\WorkBuddyStreakLaunch` | 任务定义 XML（系统内部存储，只读参考） |

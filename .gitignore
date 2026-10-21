@@ -5,6 +5,8 @@ scripts/qoder_config.json
 scripts/.qoder_token_cache.json
 # Trae / WorkBuddy 无凭据落盘，但日志可能含账号信息片段
 scripts/*.log
+# 连签守卫的当天复核状态（本机运行产物）
+scripts/.streak_state.json
 
 # Python
 __pycache__/

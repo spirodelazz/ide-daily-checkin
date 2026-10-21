@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-10-21
+
+### Fixed
+
+- 成长中心连签守卫形同虚设：客户端每天 03:02 自我重启后常驻，10:00 时 `Get-Process WorkBuddy` 必然命中，脚本直接 `exit 0` 什么都没做（`AppStartup.log` 里自 10-09 起没有任何 10:00 前后的启动记录）。2026-10-20 因当天没有真实登录，连签停在 19 天后归零
+- `workbuddy_streak_launch.ps1` 改为「校验 → 重启 → 复核」：先读 `.streak_state.json` 判断当天是否已复核，再用 `probe_streak.py --days` 取基线，未记账则结束旧进程重新拉起、窗口保持可见 60 秒、每 20 秒复探最多 3 次，天数增长才写入状态；整套最多重来一次，失败退出码 3
+- 主实例启动不足 3 分钟时先等 90 秒再接手，避免与登录握手抢跑；辅助/CLI 子进程的启动时间不再参与判断
+- `WorkBuddyStreakLaunch` 任务时限 10 → 15 分钟（两次尝试需要更长时间），同步更新任务描述
+
+### Added
+
+- `workbuddy_streak_launch.ps1 -DryRun`：只输出判定与日志，不结束进程、不拉起客户端
+- `workbuddy_streak_launch.ps1 -MechanicsTest`：真重启一轮，只验证「结束进程 → 拉起 → 窗口出现 → 探针可读」，不判断天数、不写 state，结束后保留窗口便于观察
+- `probe_streak.py --days`：只输出 `days=<n>` 供守卫脚本解析，读取失败为 `days=-1` 且退出码 1
+- `scripts\streak_launch.log`：守卫的判定、重启、复核明细
+
+### Notes
+
+- 脚本含中文字符串，必须以 **UTF-8 with BOM** 保存，否则 Windows PowerShell 5.1 会按 ANSI 解析导致语法错误
+- 守卫强制结束进程后，客户端会在 `~/.workbuddy/logs/Crash-Log/` 留一条 `crash-report-daemon-*.json`（sidecar `exitCode=-1`），属重启的预期副作用
+
 ## 2026-10-19
 
 ### Fixed

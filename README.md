@@ -81,7 +81,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install-trae-windows.ps1
 | 立即跑一次 | `Start-ScheduledTask -TaskName 'AllAutoCheckin'` |
 | 前台看输出 | `python scripts\run_all_checkin.py` |
 | 查 WorkBuddy 状态 | `python scripts\signin.py status` |
-| 查连签天数 | `python scripts\probe_streak.py` |
+| 查连签天数 | `python scripts\probe_streak.py`（加 `--days` 只输出天数） |
 | 单跑 Trae | `node scripts\trae_checkin_api.mjs --trigger manual` |
 | 查任务状态 | `Get-ScheduledTask -TaskName 'AllAutoCheckin'` |
 
@@ -90,7 +90,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install-trae-windows.ps1
 | 任务名 | 触发（北京时间） | 内容 |
 | --- | --- | --- |
 | `AllAutoCheckin` | 10:20 主跑，15:00 / 20:30 兜底 | 顺序跑三套签到，时限 15 分钟 |
-| `WorkBuddyStreakLaunch` | 每天 10:00 | 客户端未运行时静默拉起并隐藏窗口，保住成长中心连签 |
+| `WorkBuddyStreakLaunch` | 每天 10:00 | 校验成长中心当天是否已记账，未记账则结束旧进程并重新拉起客户端，探针复核通过才收工；时限 15 分钟 |
 
 几条设计约定：主跑选 10:20 是因为 Qoder 额度在 10:00（UTC+8）刷新；轮询用多个独立 Daily 触发器而非「重复间隔」（后者错过会永久跳过）；`StartWhenAvailable` 补跑、`IgnoreNew` 防重复实例。任务在任务计划程序中默认为隐藏，需「查看 → 显示隐藏的任务」；任务 XML 里时间是 **UTC**。
 
@@ -115,11 +115,11 @@ ide-daily-checkin/
 └── CHANGELOG.md
 ```
 
-凭据（`qoder_config.json`、`qoder_accounts.json`、`.qoder_token_cache.json`）与全部 `*.log` 已在 `.gitignore` 中排除。
+凭据（`qoder_config.json`、`qoder_accounts.json`、`.qoder_token_cache.json`）、全部 `*.log` 与守卫状态 `.streak_state.json` 已在 `.gitignore` 中排除。
 
 ## 日志
 
-只需要看 `scripts/all_checkin.log`：每次运行先汇入三套的新增明细行（`script` 字段区分归属），最后一行是汇总。`signin.log` / `qoder_checkin.log` / `trae_checkin.log` 是各脚本原生日志。
+只需要看 `scripts/all_checkin.log`：每次运行先汇入三套的新增明细行（`script` 字段区分归属），最后一行是汇总。`signin.log` / `qoder_checkin.log` / `trae_checkin.log` 是各脚本原生日志；`streak_launch.log` 是连签守卫的判定与复核过程。
 
 ## 常见问题
 
@@ -129,7 +129,7 @@ ide-daily-checkin/
 | Qoder `PENDING` | 每日活动未下发，等后续轮询兜底 |
 | Qoder 连续 `ERROR` | 清空 `HTTP(S)_PROXY` 后重试；关注上游适配更新 |
 | WorkBuddy `AUTH_*` / 断签 | 桌面端重新登录；`python scripts\signin.py doctor` 体检 |
-| WorkBuddy 成长中心断连签 | 连签只认客户端当天登录，检查 `WorkBuddyStreakLaunch` 是否执行 |
+| WorkBuddy 成长中心断连签 | 连签只认客户端当天的真实登录（常驻进程与 03:02 自启不算）；看 `scripts\streak_launch.log` 与 `python scripts\probe_streak.py`，必要时手动跑一次 `scripts\workbuddy_streak_launch.ps1` |
 | Trae `LOGIN_REQUIRED` | 超过两周未启动 Trae，token 过期；打开一次即可 |
 
 **客户端不运行也能签到吗？** Qoder 与 Trae 可以（纯 HTTP 调用）；WorkBuddy 需要客户端**已安装**（运行时拉起内部辅助进程解密凭据），但 GUI 不必在运行。
