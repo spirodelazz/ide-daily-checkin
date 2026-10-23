@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-23
+
+### Fixed
+
+- 连签守卫的判定前提错了：连签不认「客户端启动」，认的是「窗口在前台被刷新」。`main.log` 里 `[Checkin] refresh triggered by window focus / page visible` 是客户端的刷新入口；10-22 与 10-23 两次运行把窗口显示出来保持 60 秒但没抢到焦点，连签一整天没动，10-22 因此断签（10-23 探针 `days` 由 0 起算）
+- 守卫新增置前步骤：`SetForegroundWindow` + `AttachThreadInput`，并用 `GetForegroundWindow` 逐次校验。实测程序抢到的焦点会让客户端打出与真人点击相同的 `refresh triggered by window focus` 日志
+- 未记账时先尝试「只置前、不重启」，等 30 秒仍不记账才结束进程重新拉起；窗口可见时长 60 → 90 秒，复探 3 次 × 25 秒
+
 ## 2026-10-21
 
 ### Fixed

@@ -1,16 +1,18 @@
-﻿# WorkBuddyStreakLaunch - 每日真实登录守卫
-# 目的：成长中心"连签"只认桌面客户端当天的一次真实登录（脚本调 API 无效）。
-#       客户端每天 03:02 会自我重启后常驻，常驻或后台自启都不记账，
-#       所以守卫不再"进程存在就跳过"，而是校验当天是否已记账，
-#       未记账则结束旧进程、重新拉起、让窗口可见一段时间，再用探针复核。
+﻿# WorkBuddyStreakLaunch - 每日连签守卫
+# 目的：成长中心"连签"要求客户端当天**在前台被使用过**（`main.log` 里
+#       `[Checkin] refresh triggered by window focus / page visible`）。
+#       常驻进程、后台自启、单纯显示窗口都不记账（2026-10-22/23 两次实测：
+#       窗口可见 60 秒但没抢焦点，连签一天没动）。所以守卫要保证当天有一次
+#       "窗口被置前并保持可见"的过程，再靠探针确认连签天数真的涨了。
 #
 # 判定顺序：
 #   1. .streak_state.json 已记录今天 → 直接退出（每天最多折腾一次）
 #   2. 读连签基线（probe_streak.py --days）
-#   3. 有 WorkBuddy 进程则整组结束，重新拉起（最近 3 分钟内启动的先等启动流程走完）
-#   4. 主窗口出现后保持可见 60 秒，再隐藏到托盘（App 自带 closeToTray）
-#   5. 每 20 秒复探一次，连签天数比基线大即记为成功，写入 state
-#   6. 仍未记账则整套重来一次，两次都失败退出码 3（任务计划程序可见）
+#   3. 客户端已在运行 → 先把窗口置前等 30 秒，客户端自己记账就收工（不重启）
+#   4. 没记账 → 结束旧进程、重新拉起（最近 3 分钟内启动的先等启动流程走完）
+#   5. 主窗口出现后置前并保持可见 90 秒，再隐藏到托盘（App 自带 closeToTray）
+#   6. 每 25 秒复探一次，连签天数比基线大即记为成功，写入 state
+#   7. 仍未记账则整套重来一次，两次都失败退出码 3（任务计划程序可见）
 #
 # 任务名：WorkBuddyStreakLaunch（每天 10:00，错过开机补跑，时限 15 分钟）
 # 用法：powershell -File workbuddy_streak_launch.ps1 [-DryRun] [-MechanicsTest]
@@ -31,10 +33,12 @@ $logFile = Join-Path $scriptDir 'streak_launch.log'
 $stateFile = Join-Path $scriptDir '.streak_state.json'
 $probeScript = Join-Path $scriptDir 'probe_streak.py'
 
-$VISIBLE_SECONDS = 60        # 窗口保持可见的时长（等首页/登录态加载完）
+$VISIBLE_SECONDS = 90        # 窗口置前后保持可见的时长（客户端按焦点/可见刷新签到与成长数据）
 $WINDOW_WAIT_SEC = 60        # 等主窗口出现的最长时长
+$FOCUS_WAIT_SEC = 30         # 只置前不重启时，等待客户端自己记账的时长
+$FOREGROUND_TRIES = 8        # 抢前台焦点的重试次数（每次间隔 1 秒）
 $VERIFY_TRIES = 3            # 每次尝试内复探次数
-$VERIFY_INTERVAL_SEC = 20    # 复探间隔
+$VERIFY_INTERVAL_SEC = 25    # 复探间隔
 $MAX_ATTEMPTS = 2            # 整套（结束进程 + 拉起）最多执行次数
 
 function Write-Log([string]$msg) {
@@ -162,6 +166,58 @@ function Start-Detached([string]$path) {
     }
 }
 
+# 客户端只在"窗口获得焦点 / 页面可见"时才刷新签到与成长中心数据
+# （main.log: `[Checkin] refresh triggered by window focus / page visible`）。
+# 任务计划程序起出来的窗口默认拿不到前台焦点，所以必须显式置前：
+# 先用 SW_RESTORE，再走 AttachThreadInput 挂到当前前台线程上抢焦点，
+# 最后用 GetForegroundWindow 校验，失败按 1 秒间隔重试。
+function Ensure-Foreground([IntPtr]$hwnd) {
+    if ($hwnd -eq [IntPtr]::Zero) { return $false }
+    if ($DryRun) { return $false }
+    try {
+        if (-not ('Native.Fg' -as [type])) {
+            Add-Type -Namespace Native -Name Fg -MemberDefinition '
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+[DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
+[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+[DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr pid);
+[DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+[DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);'
+        }
+        for ($i = 0; $i -lt $FOREGROUND_TRIES; $i++) {
+            if ([Native.Fg]::IsIconic($hwnd)) {
+                [void][Native.Fg]::ShowWindow($hwnd, 9)          # SW_RESTORE
+            } elseif (-not [Native.Fg]::IsWindowVisible($hwnd)) {
+                [void][Native.Fg]::ShowWindow($hwnd, 5)          # SW_SHOW：上一轮被隐藏到托盘的窗口先显示回来
+            }
+            [void][Native.Fg]::BringWindowToTop($hwnd)
+            [void][Native.Fg]::SetForegroundWindow($hwnd)
+
+            $fg = [Native.Fg]::GetForegroundWindow()
+            $fgThread = [Native.Fg]::GetWindowThreadProcessId($fg, [IntPtr]::Zero)
+            $myThread = [Native.Fg]::GetCurrentThreadId()
+            if ($fgThread -ne $myThread) {
+                [void][Native.Fg]::AttachThreadInput($myThread, $fgThread, $true)
+                [void][Native.Fg]::SetForegroundWindow($hwnd)
+                [void][Native.Fg]::AttachThreadInput($myThread, $fgThread, $false)
+            }
+            if ([Native.Fg]::GetForegroundWindow() -eq $hwnd) {
+                Write-Log ('窗口已置前（第 {0} 次尝试）' -f ($i + 1))
+                return $true
+            }
+            Start-Sleep -Milliseconds 1000
+        }
+        Write-Log '⚠️ 未能拿到前台焦点（窗口可能被其他程序抢回），继续按可见等待'
+        return $false
+    } catch {
+        Write-Log ('⚠️ 置前失败: {0}' -f $_.Exception.Message)
+        return $false
+    }
+}
+
 function Start-WorkBuddy {
     Write-Log ("拉起客户端: {0}" -f $exe)
     if ($DryRun) { return [IntPtr]::Zero }
@@ -176,7 +232,8 @@ function Start-WorkBuddy {
     if ($hwnd -eq [IntPtr]::Zero) {
         Write-Log ('⚠️ {0} 秒内没等到主窗口' -f $WINDOW_WAIT_SEC)
     } else {
-        Write-Log '主窗口已出现，保持可见等待登录记账'
+        Write-Log '主窗口已出现，置前并保持可见等待记账'
+        [void](Ensure-Foreground $hwnd)
     }
     return $hwnd
 }
@@ -226,6 +283,30 @@ if ($MechanicsTest) { $attempts = 1 }
 
 for ($attempt = 1; $attempt -le $attempts; $attempt++) {
     if ($attempt -gt 1) { Write-Log ("第 {0} 次尝试" -f $attempt) }
+
+    # 第一轮先不动进程：把已经开着的窗口置前，看客户端自己会不会记账
+    if ($attempt -eq 1) {
+        $live = Get-WorkBuddyProcesses | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+        if ($live) {
+            Write-Log '客户端已在运行，先直接置前（不重启）'
+            [void](Ensure-Foreground $live.MainWindowHandle)
+            if ($DryRun) {
+                Write-Log '[DryRun] 到此为止：不重启、不隐藏'
+                break
+            }
+            Start-Sleep -Seconds $FOCUS_WAIT_SEC
+            $days = Get-StreakDays $python
+            if ($null -ne $days) {
+                $lastDays = $days
+                Write-Log ("置前后复探 days={0}" -f $days)
+                if (($null -eq $baseline -and $days -ge 1) -or ($null -ne $baseline -and $days -gt $baseline)) {
+                    $success = $true
+                }
+            }
+            if ($success) { break }
+            Write-Log '置前没触发记账，改为重启客户端'
+        }
+    }
 
     Stop-WorkBuddy
     $hwnd = Start-WorkBuddy

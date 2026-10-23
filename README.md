@@ -90,7 +90,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install-trae-windows.ps1
 | 任务名 | 触发（北京时间） | 内容 |
 | --- | --- | --- |
 | `AllAutoCheckin` | 10:20 主跑，15:00 / 20:30 兜底 | 顺序跑三套签到，时限 15 分钟 |
-| `WorkBuddyStreakLaunch` | 每天 10:00 | 校验成长中心当天是否已记账，未记账则结束旧进程并重新拉起客户端，探针复核通过才收工；时限 15 分钟。宿主为 `pythonw.exe`，全程不弹控制台 |
+| `WorkBuddyStreakLaunch` | 每天 10:00 | 校验成长中心当天是否已记账；未记账先把客户端窗口置前等 30 秒，仍不记账才结束旧进程重新拉起并保持可见 90 秒；探针复核通过才收工，时限 15 分钟。宿主为 `pythonw.exe`，全程不弹控制台 |
 
 几条设计约定：主跑选 10:20 是因为 Qoder 额度在 10:00（UTC+8）刷新；轮询用多个独立 Daily 触发器而非「重复间隔」（后者错过会永久跳过）；`StartWhenAvailable` 补跑、`IgnoreNew` 防重复实例。任务在任务计划程序中默认为隐藏，需「查看 → 显示隐藏的任务」；任务 XML 里时间是 **UTC**。
 
@@ -130,7 +130,7 @@ ide-daily-checkin/
 | Qoder `PENDING` | 每日活动未下发，等后续轮询兜底 |
 | Qoder 连续 `ERROR` | 清空 `HTTP(S)_PROXY` 后重试；关注上游适配更新 |
 | WorkBuddy `AUTH_*` / 断签 | 桌面端重新登录；`python scripts\signin.py doctor` 体检 |
-| WorkBuddy 成长中心断连签 | 连签只认客户端当天的真实登录（常驻进程与 03:02 自启不算）；看 `scripts\streak_launch.log` 与 `python scripts\probe_streak.py`，必要时手动跑一次 `scripts\workbuddy_streak_launch.ps1` |
+| WorkBuddy 成长中心断连签 | 连签只认客户端窗口当天**在前台被刷新过**（常驻进程、03:02 自启、窗口只显示不聚焦都不算）；看 `scripts\streak_launch.log` 与 `python scripts\probe_streak.py`，必要时手动跑一次 `scripts\workbuddy_streak_launch.ps1` |
 | Trae `LOGIN_REQUIRED` | 超过两周未启动 Trae，token 过期；打开一次即可 |
 
 **客户端不运行也能签到吗？** Qoder 与 Trae 可以（纯 HTTP 调用）；WorkBuddy 需要客户端**已安装**（运行时拉起内部辅助进程解密凭据），但 GUI 不必在运行。

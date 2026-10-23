@@ -35,18 +35,22 @@ signin.py silent-poll
 
 ### WorkBuddyStreakLaunch（连签守卫）
 
-成长中心"连签"只认桌面客户端当天的**一次真实登录**：客户端每天 03:02 自我重启一次后常驻，常驻进程与后台自启都不记账，`signin.py` 调 API 也无法代替（`/v2/activity/growth/` 下没有登录上报接口）。
+成长中心"连签"要求客户端当天**在前台被使用过一次**：客户端的签到与成长数据刷新是挂在「窗口获得焦点 / 页面可见」上的（`main.log` 里的 `[Checkin] refresh triggered by window focus / page visible`）。常驻进程、后台自启、窗口只是"显示"但没拿到焦点都不记账——2026-10-22 与 10-23 两天实测，脚本把窗口显示出来保持 60 秒、连签一整天没动；真人点一下窗口（哪怕是从托盘恢复、没有重新启动进程）立刻就记上了。
 
-守卫每天 10:00 校验当天是否已记账，未记账就结束旧进程、重新拉起、让窗口可见 60 秒，再用探针复核天数是否增长；复核通过才把当天写入状态文件，因此一天最多折腾一次。
+`signin.py` 调 API 无法代替：`/v2/activity/growth/` 下没有打卡接口，连签是服务端按客户端的前台刷新算的。
+
+守卫每天 10:00 校验当天是否已记账，未记账就先把窗口置前试试（不重启），不行再结束旧进程重新拉起、置前并保持可见 90 秒，最后用探针复核天数；复核通过才写入状态文件，因此一天最多折腾一次。
 
 - 触发：每天 **10:00**，`StartWhenAvailable=true`（关机错过则开机补跑），时限 15 分钟
 - 判定与执行顺序：
   1. `scripts\.streak_state.json` 记录的日期是今天 → 直接退出（当天已复核）
-  2. `probe_streak.py --days` 读连签基线（读不到则本轮只保证"起来一次"）
-  3. 主实例启动不足 3 分钟时先等 90 秒，避免和登录握手抢跑；随后结束所有 `WorkBuddy` 进程
-  4. 拉起客户端，主窗口出现后**保持可见 60 秒**（等首页加载与登录上报），再隐藏到托盘
-  5. 每 20 秒复探一次（最多 3 次），天数大于基线即成功，写入 `.streak_state.json`
-  6. 仍未记账则整套重来一次；两次都失败退出码 3，明细在 `scripts\streak_launch.log`
+  2. `probe_streak.py --days` 读连签基线（读不到则本轮只保证"置前一次"）
+  3. 客户端已在运行 → 直接把窗口置前（隐藏到托盘的会先 `SW_SHOW`，最小化的 `SW_RESTORE`），等 30 秒看是否记账；记上了就结束，**不动进程**
+  4. 没记上 → 主实例启动不足 3 分钟时先等 90 秒，随后结束所有 `WorkBuddy` 进程
+  5. 重新拉起，主窗口出现后置前并**保持可见 90 秒**，再隐藏到托盘
+  6. 每 25 秒复探一次（最多 3 次），天数大于基线即成功，写入 `.streak_state.json`
+  7. 仍未记账则整套重来一次；两次都失败退出码 3，明细在 `scripts\streak_launch.log`
+- 置前用 `SetForegroundWindow` + `AttachThreadInput`（任务计划程序起的进程默认抢不到前台焦点），并用 `GetForegroundWindow` 逐次校验，失败会写进日志
 - 隐藏用 `ShowWindowAsync(hwnd, 0)`；App 自带 closeToTray，托盘图标或再次双击 `WorkBuddy.exe` 可唤回窗口
 - 任务的宿主是 `pythonw.exe`（GUI 子系统，自身无控制台），由 `scripts\workbuddy_streak_launch.pyw` 用 `CREATE_NO_WINDOW` 起 PowerShell：直接让任务计划程序起 `powershell.exe` 时，`-WindowStyle Hidden` 只能隐藏已经创建的窗口，启动瞬间仍会闪一下黑框，而 `CREATE_NO_WINDOW` 连控制台窗口都不分配
 - 拉起用 `ProcessStartInfo(UseShellExecute=false, CreateNoWindow=true)` 分离启动，不用 `Start-Process`：后者让客户端继承任务进程的标准句柄，客户端及其控制台子进程会挂在任务进程那个控制台上——脚本退出后窗口不消失，还被客户端日志持续刷屏（关掉该窗口会以 `STATUS_CONTROL_C_EXIT` 连带杀掉客户端）
