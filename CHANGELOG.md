@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-24
+
+### Changed
+
+- 连签方案换向：不再拉起/重启客户端，改为每天用无头 CLI 跑一次极简会话。10-22 ~ 10-24 三天实测证伪了「启动/置前即记账」——脚本把客户端重启、窗口置前、保持可见 90 秒，连签天数一次没动；同期本人打开窗口说一句话，天数立刻 +1（10-23 19:18、10-24 11:56）。连签跟随的是当天的真实使用，与进程和焦点无关
+- 新增 `scripts\streak_warmup.py`：解出桌面端 `accessToken` 并注入 `CODEBUDDY_AUTH_TOKEN`，用 `node` 跑 `resources\app.asar.unpacked\cli\bin\codebuddy -p "回复ok" --tools "" --port <随机>`，约 7–9 秒完成一次真实会话；随后每 30 秒复探、最多 3 次，天数增长即记为达标，最多两轮
+- 任务 `WorkBuddyStreakLaunch`（10:00，时限 15 分钟）由 `WorkBuddyStreakWarmup`（10:00 + 18:00 重试，时限 10 分钟，宿主仍为 `pythonw.exe`）取代；状态文件的 `ok` 字段决定 18:00 那次是否短路
+- 同日已记账时（基线比上次记录的天数大）跳过会话直接记达标，避免重复消耗；`accessToken` 剩余有效期不足 0.5 天时退出码 2 并提示打开客户端续期
+
+### Removed
+
+- `scripts\workbuddy_streak_launch.ps1`、`scripts\workbuddy_streak_launch.pyw`：拉起式守卫的整套窗口置前、杀进程、分离启动逻辑随方案作废（历史版本见 git）
+
+### Notes
+
+- 退出码：`0` 已记账或今天已记过账 / `2` 无可用凭证 / `3` 会话跑了但天数没涨 / `4` CLI 找不到或执行失败。`3` 连续出现说明这条机制不成立，需要重新判断连签的真实触发条件
+- CLI 会话复用桌面端凭证，不新建登录；`--tools ""` 禁用全部工具，会话只做一次问答，不读写任何文件
+
 ## 2026-10-23
 
 ### Fixed

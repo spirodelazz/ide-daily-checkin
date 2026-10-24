@@ -1,14 +1,14 @@
 ---
 doc-type: how-to
 reader: 查看、修改或卸载 WorkBuddy 本地定时任务的人
-asof: 2026-10-21
+asof: 2026-10-24
 ---
 
 # WorkBuddy 本地定时任务（Windows 任务计划程序）
 
 > WorkBuddy 签到系统详情：任务配置、查看方式与卸载方法。
 > `WorkBuddyAutoSignin` / `WorkBuddyGrowthPoll` 由**上游仓库**的 `install-windows.ps1` 注册（本仓库只收录 `scripts\signin.py`）；
-> `WorkBuddyStreakLaunch` 由本仓库维护（注册命令见下文）。
+> `WorkBuddyStreakWarmup` 由本仓库维护（注册命令见下文）。
 > 统一部署时由 `AllAutoCheckin` 以 `silent-poll` 模式调用 `signin.py`，总览见 [README.md](README.md)。
 
 ## 原理
@@ -31,40 +31,52 @@ signin.py silent-poll
 |---|---|---|---|---|
 | `WorkBuddyAutoSignin` | 每日自动签到（静默、零 token） | 每天 **00:05** | `pythonw.exe signin.py silent` | 10 分钟 |
 | `WorkBuddyGrowthPoll` | 轮询（补签 + 成长中心） | 每天 **01/05/09/13/17/21** 点 | `pythonw.exe signin.py silent-poll` | 5 分钟 |
-| `WorkBuddyStreakLaunch` | 每天真实登录一次，保成长中心连签 | 每天 **10:00** | `pythonw.exe workbuddy_streak_launch.pyw` | 15 分钟 |
+| `WorkBuddyStreakWarmup` | 每天跑一次无头会话，保成长中心连签 | 每天 **10:00**，失败当日 **18:00** 重试 | `pythonw.exe streak_warmup.py` | 10 分钟 |
 
-### WorkBuddyStreakLaunch（连签守卫）
+### WorkBuddyStreakWarmup（连签保活）
 
-成长中心"连签"要求客户端当天**在前台被使用过一次**：客户端的签到与成长数据刷新是挂在「窗口获得焦点 / 页面可见」上的（`main.log` 里的 `[Checkin] refresh triggered by window focus / page visible`）。常驻进程、后台自启、窗口只是"显示"但没拿到焦点都不记账——2026-10-22 与 10-23 两天实测，脚本把窗口显示出来保持 60 秒、连签一整天没动；真人点一下窗口（哪怕是从托盘恢复、没有重新启动进程）立刻就记上了。
+成长中心"连签"跟随的是**当天有一次真实使用**（一次 AI 会话），与客户端是否运行无关。2026-10-22 ~ 10-24 三天实测：
 
-`signin.py` 调 API 无法代替：`/v2/activity/growth/` 下没有打卡接口，连签是服务端按客户端的前台刷新算的。
+| 日期 | 脚本动作 | 当日连签变化 |
+|---|---|---|
+| 10-22 | 结束进程 + 重新拉起，窗口可见 61 秒 | 三次读数全是 21，一整天没动 |
+| 10-23 | 无动作 | 15:00 还是 0，19:18 本人开口说话后变 1 |
+| 10-24 | 置前 + 两轮结束进程重启，可见 90 秒 | 10:00–10:20 全是 1，11:56 本人开始对话后变 2 |
 
-守卫每天 10:00 校验当天是否已记账，未记账就先把窗口置前试试（不重启），不行再结束旧进程重新拉起、置前并保持可见 90 秒，最后用探针复核天数；复核通过才写入状态文件，因此一天最多折腾一次。
+启动、常驻、每日 03:02 自启、程序化置前、强制重启都不记账；`signin.py` 调 API 也代替不了（`/v2/activity/growth/` 下没有打卡接口）。保活脚本因此用无头 CLI 造一次真实会话：
 
-- 触发：每天 **10:00**，`StartWhenAvailable=true`（关机错过则开机补跑），时限 15 分钟
-- 判定与执行顺序：
-  1. `scripts\.streak_state.json` 记录的日期是今天 → 直接退出（当天已复核）
-  2. `probe_streak.py --days` 读连签基线（读不到则本轮只保证"置前一次"）
-  3. 客户端已在运行 → 直接把窗口置前（隐藏到托盘的会先 `SW_SHOW`，最小化的 `SW_RESTORE`），等 30 秒看是否记账；记上了就结束，**不动进程**
-  4. 没记上 → 主实例启动不足 3 分钟时先等 90 秒，随后结束所有 `WorkBuddy` 进程
-  5. 重新拉起，主窗口出现后置前并**保持可见 90 秒**，再隐藏到托盘
-  6. 每 25 秒复探一次（最多 3 次），天数大于基线即成功，写入 `.streak_state.json`
-  7. 仍未记账则整套重来一次；两次都失败退出码 3，明细在 `scripts\streak_launch.log`
-- 置前用 `SetForegroundWindow` + `AttachThreadInput`（任务计划程序起的进程默认抢不到前台焦点），并用 `GetForegroundWindow` 逐次校验，失败会写进日志
-- 隐藏用 `ShowWindowAsync(hwnd, 0)`；App 自带 closeToTray，托盘图标或再次双击 `WorkBuddy.exe` 可唤回窗口
-- 任务的宿主是 `pythonw.exe`（GUI 子系统，自身无控制台），由 `scripts\workbuddy_streak_launch.pyw` 用 `CREATE_NO_WINDOW` 起 PowerShell：直接让任务计划程序起 `powershell.exe` 时，`-WindowStyle Hidden` 只能隐藏已经创建的窗口，启动瞬间仍会闪一下黑框，而 `CREATE_NO_WINDOW` 连控制台窗口都不分配
-- 拉起用 `ProcessStartInfo(UseShellExecute=false, CreateNoWindow=true)` 分离启动，不用 `Start-Process`：后者让客户端继承任务进程的标准句柄，客户端及其控制台子进程会挂在任务进程那个控制台上——脚本退出后窗口不消失，还被客户端日志持续刷屏（关掉该窗口会以 `STATUS_CONTROL_C_EXIT` 连带杀掉客户端）
-- 强制结束进程会让客户端在 `~/.workbuddy/logs/Crash-Log/` 留一条 `crash-report-daemon-*.json`（sidecar 以 `exitCode=-1` 退出），属重启的预期副作用，不代表客户端异常
-- 手动预演（不结束进程、不拉起客户端）：`powershell -ExecutionPolicy Bypass -File scripts\workbuddy_streak_launch.ps1 -DryRun`
-- 冒烟自检（真重启一轮，但不判断天数、不写状态、结束时保留窗口）：`powershell -ExecutionPolicy Bypass -File scripts\workbuddy_streak_launch.ps1 -MechanicsTest`
+```
+桌面端凭据（CodeBuddyExtension/Data/Public/auth/workbuddy-desktop.info）
+    ↓ 解出 accessToken（复用 signin.py 的解密逻辑）
+CODEBUDDY_AUTH_TOKEN=<token> node <客户端>\resources\app.asar.unpacked\cli\bin\codebuddy
+    -p "回复ok" --tools "" --port <随机>
+    ↓ 一次真实的一次性会话（约 7–9 秒，禁用全部工具，不读写任何文件）
+probe_streak.py --days 复核天数是否增长 → 写 .streak_state.json
+```
+
+- 触发：每天 **10:00**，同日 **18:00** 再试一次（10:00 成功的话 18:00 会直接短路退出），`StartWhenAvailable=true`，时限 10 分钟
+- 判定顺序：
+  1. `.streak_state.json` 是今天的且 `ok=true` → 直接退出（当天已成功，18:00 那次就靠这个跳过）
+  2. `probe_streak.py --days` 读基线
+  3. 基线已经比上次记录的大 → 今天此前已被本人记过账，跳过会话，直接记 `ok=true`
+  4. 读 accessToken（剩余有效期不足 0.5 天则退出码 2，提示打开客户端续期）
+  5. 跑 CLI 会话，随后每 30 秒复探、最多 3 次；天数大于基线即成功
+  6. 没涨就再跑一轮；两轮仍没涨退出码 3（说明这条机制不成立，需要重新判断）
+- 退出码：`0` 已记账或今天已记过账 / `2` 无可用凭证 / `3` 会话跑了但天数没涨 / `4` CLI 找不到或执行失败
+- 全程不触碰桌面客户端进程，也不抢占焦点或窗口
+- 手动预演（只打印将要执行什么）：`python scripts\streak_warmup.py --dry-run`
+- 手动实跑（真跑一次会话）：`python scripts\streak_warmup.py`
 - 注册命令（`<仓库路径>` 换成实际位置，`<pythonw>` 换成 `pythonw.exe` 的绝对路径）：
 
 ```powershell
-$action = New-ScheduledTaskAction -Execute '<pythonw>' -Argument '"<仓库路径>\scripts\workbuddy_streak_launch.pyw"'
-$trigger = New-ScheduledTaskTrigger -Daily -At 10:00
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
-Register-ScheduledTask -TaskName 'WorkBuddyStreakLaunch' -Action $action -Trigger $trigger -Settings $settings -Force
+$action = New-ScheduledTaskAction -Execute '<pythonw>' -Argument '"<仓库路径>\scripts\streak_warmup.py"' -WorkingDirectory '<仓库路径>\scripts'
+$t1 = New-ScheduledTaskTrigger -Daily -At 10:00
+$t2 = New-ScheduledTaskTrigger -Daily -At 18:00
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+Register-ScheduledTask -TaskName 'WorkBuddyStreakWarmup' -Action $action -Trigger @($t1,$t2) -Settings $settings -Force
 ```
+
+CLI 的定位规则（`scripts\streak_warmup.py` 内）：环境变量 `WORKBUDDY_CLI` 优先，其次是 `WORKBUDDY_HOME`、`D:\WorkBuddy`、`C:\Program Files\WorkBuddy`、`%LOCALAPPDATA%\Programs\WorkBuddy` 下的 `resources\app.asar.unpacked\cli\bin\codebuddy`。node 取 `~/.workbuddy/binaries/node/versions/*/node.exe` 中最新的一个，没有再退回 PATH。
 
 ### 公共设置（两个上游任务一致）
 
@@ -92,19 +104,19 @@ Register-ScheduledTask -TaskName 'WorkBuddyStreakLaunch' -Action $action -Trigge
 3. **关键一步**：`WorkBuddyAutoSignin` / `WorkBuddyGrowthPoll` 带 `-Hidden` 属性默认不可见 —— 菜单栏「查看(V)」→ 勾选**「显示隐藏的任务」**，列表里才会出现：
    - `WorkBuddyAutoSignin`（每天 00:05 签到）
    - `WorkBuddyGrowthPoll`（每天 01/05/09/13/17/21 点轮询）
-   - `WorkBuddyStreakLaunch`（每天 10:00 连签守卫，不带隐藏属性，始终可见）
+   - `WorkBuddyStreakWarmup`（每天 10:00 连签保活，18:00 重试位，不带隐藏属性，始终可见）
 4. 双击任一任务可查看触发器、历史记录；右键「运行」可手动触发一次
 
 ### 方式二：命令行
 
 ```powershell
 # 看三个任务是否存在、状态
-Get-ScheduledTask -TaskName 'WorkBuddyAutoSignin','WorkBuddyGrowthPoll','WorkBuddyStreakLaunch' | Select-Object TaskName, State
+Get-ScheduledTask -TaskName 'WorkBuddyAutoSignin','WorkBuddyGrowthPoll','WorkBuddyStreakWarmup' | Select-Object TaskName, State
 
 # 看下次运行时间 / 上次运行结果
 Get-ScheduledTaskInfo -TaskName 'WorkBuddyAutoSignin'
 Get-ScheduledTaskInfo -TaskName 'WorkBuddyGrowthPoll'
-Get-ScheduledTaskInfo -TaskName 'WorkBuddyStreakLaunch'
+Get-ScheduledTaskInfo -TaskName 'WorkBuddyStreakWarmup'
 
 # 手动立即触发一次（等同图形界面右键「运行」）
 Start-ScheduledTask -TaskName 'WorkBuddyAutoSignin'
@@ -118,28 +130,29 @@ Get-Content scripts\signin.log -Tail 5
 # 查成长中心连签状态（连签天数 / 补登卡余额 / 可补日期）
 python scripts\probe_streak.py
 
-# 只看连签天数（守卫脚本内部用的形式）
+# 只看连签天数（保活脚本内部用的形式）
 python scripts\probe_streak.py --days
 
-# 连签守卫的判定与复核过程
-Get-Content scripts\streak_launch.log -Tail 20
+# 连签保活的会话与复核过程
+Get-Content scripts\streak_warmup.log -Tail 20
 ```
 
 日志每行一条 JSON，关键字段：`result`（CLAIMED=签到成功 / ALREADY=已签过）、`streak_days` 连续天数、`total_credits` 累计积分、`trigger: "poll"` 表示由轮询任务触发。
+
+`streak_warmup.log` 是纯文本时间线，每次保活记录基线、会话耗时与回复、复探读数；`.streak_state.json` 用 `date` / `days` / `result` / `ok` 四个字段标记当天是否已达标。
 
 ## 相关文件
 
 | 路径 | 说明 |
 |---|---|
 | `scripts\signin.py` | 主脚本（签到 + 成长中心轮询逻辑），收录自上游 [88lin/workbuddy-auto-signin](https://github.com/88lin/workbuddy-auto-signin)（MIT） |
-| `scripts\workbuddy_streak_launch.ps1` | 连签守卫：校验当天是否记账 → 结束旧进程 → 重新拉起并保留窗口 60 秒 → 探针复核 → 记录状态 |
-| `scripts\workbuddy_streak_launch.pyw` | 无控制台启动器：任务计划程序用它当宿主，再以 `CREATE_NO_WINDOW` 起 PowerShell |
+| `scripts\streak_warmup.py` | 连签保活：读 accessToken → 跑一次无头 CLI 会话 → 探针复核天数 → 记录状态 |
 | `scripts\probe_streak.py` | 只读探针：查询成长中心连签状态（`/v2/activity/growth/streak`），`--days` 输出供脚本解析 |
-| `scripts\.streak_state.json` | 守卫状态文件：记录最近一次复核通过的日期与连签天数（本地生成，不入库） |
-| `scripts\streak_launch.log` | 守卫运行日志（每次判定、重启、复核结果各一行） |
+| `scripts\.streak_state.json` | 状态文件：记录最近一次运行日期、连签天数与是否达标 `ok`（本地生成，不入库） |
+| `scripts\streak_warmup.log` | 保活运行日志（基线、会话结果、复探读数、结论） |
 | 上游仓库根目录 `install-windows.ps1` | 注册上游两个任务的安装脚本，未收录进本仓库 |
 | `scripts\signin.log` | 运行日志（统一任务会把新增行汇入 `all_checkin.log`） |
-| `C:\Windows\System32\Tasks\WorkBuddyAutoSignin` / `...\WorkBuddyGrowthPoll` / `...\WorkBuddyStreakLaunch` | 任务定义 XML（系统内部存储，只读参考） |
+| `C:\Windows\System32\Tasks\WorkBuddyAutoSignin` / `...\WorkBuddyGrowthPoll` / `...\WorkBuddyStreakWarmup` | 任务定义 XML（系统内部存储，只读参考） |
 
 ## 卸载 / 停用
 
@@ -147,12 +160,12 @@ Get-Content scripts\streak_launch.log -Tail 20
 # 删除（各任务分别执行）
 Unregister-ScheduledTask -TaskName "WorkBuddyAutoSignin" -Confirm:$false
 Unregister-ScheduledTask -TaskName "WorkBuddyGrowthPoll" -Confirm:$false
-Unregister-ScheduledTask -TaskName "WorkBuddyStreakLaunch" -Confirm:$false
+Unregister-ScheduledTask -TaskName "WorkBuddyStreakWarmup" -Confirm:$false
 
 # 仅临时停用
 Disable-ScheduledTask -TaskName "WorkBuddyAutoSignin"
 Disable-ScheduledTask -TaskName "WorkBuddyGrowthPoll"
-Disable-ScheduledTask -TaskName "WorkBuddyStreakLaunch"
+Disable-ScheduledTask -TaskName "WorkBuddyStreakWarmup"
 ```
 
 也可在任务计划程序里右键对应任务选择「删除」或「禁用」。

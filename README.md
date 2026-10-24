@@ -90,7 +90,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install-trae-windows.ps1
 | 任务名 | 触发（北京时间） | 内容 |
 | --- | --- | --- |
 | `AllAutoCheckin` | 10:20 主跑，15:00 / 20:30 兜底 | 顺序跑三套签到，时限 15 分钟 |
-| `WorkBuddyStreakLaunch` | 每天 10:00 | 校验成长中心当天是否已记账；未记账先把客户端窗口置前等 30 秒，仍不记账才结束旧进程重新拉起并保持可见 90 秒；探针复核通过才收工，时限 15 分钟。宿主为 `pythonw.exe`，全程不弹控制台 |
+| `WorkBuddyStreakWarmup` | 每天 10:00，失败当日 18:00 重试 | 连签保活：读桌面端 accessToken，用无头 CLI 跑一次极简会话（`-p "回复ok" --tools ""`），再用探针复核连签天数是否增长；不触碰客户端进程。宿主为 `pythonw.exe`，全程不弹控制台，时限 10 分钟 |
 
 几条设计约定：主跑选 10:20 是因为 Qoder 额度在 10:00（UTC+8）刷新；轮询用多个独立 Daily 触发器而非「重复间隔」（后者错过会永久跳过）；`StartWhenAvailable` 补跑、`IgnoreNew` 防重复实例。任务在任务计划程序中默认为隐藏，需「查看 → 显示隐藏的任务」；任务 XML 里时间是 **UTC**。
 
@@ -102,8 +102,7 @@ ide-daily-checkin/
 │   ├── run_all_checkin.py           统一主控（汇总 all_checkin.log）
 │   ├── install-all-checkin.ps1      注册统一任务
 │   ├── signin.py                    WorkBuddy 签到
-│   ├── workbuddy_streak_launch.ps1  连签守卫
-│   ├── workbuddy_streak_launch.pyw  无控制台启动器（任务宿主）
+│   ├── streak_warmup.py             连签保活（无头 CLI 会话 + 复核）
 │   ├── probe_streak.py              连签状态探针（只读）
 │   ├── qoder_checkin.py             Qoder 签到
 │   ├── qoder_extract.py             Qoder 凭据提取
@@ -116,11 +115,11 @@ ide-daily-checkin/
 └── CHANGELOG.md
 ```
 
-凭据（`qoder_config.json`、`qoder_accounts.json`、`.qoder_token_cache.json`）、全部 `*.log` 与守卫状态 `.streak_state.json` 已在 `.gitignore` 中排除。
+凭据（`qoder_config.json`、`qoder_accounts.json`、`.qoder_token_cache.json`）、全部 `*.log` 与保活状态 `.streak_state.json` 已在 `.gitignore` 中排除。
 
 ## 日志
 
-只需要看 `scripts/all_checkin.log`：每次运行先汇入三套的新增明细行（`script` 字段区分归属），最后一行是汇总。`signin.log` / `qoder_checkin.log` / `trae_checkin.log` 是各脚本原生日志；`streak_launch.log` 是连签守卫的判定与复核过程。
+只需要看 `scripts/all_checkin.log`：每次运行先汇入三套的新增明细行（`script` 字段区分归属），最后一行是汇总。`signin.log` / `qoder_checkin.log` / `trae_checkin.log` 是各脚本原生日志；`streak_warmup.log` 是连签保活的会话与复核过程。
 
 ## 常见问题
 
@@ -130,7 +129,7 @@ ide-daily-checkin/
 | Qoder `PENDING` | 每日活动未下发，等后续轮询兜底 |
 | Qoder 连续 `ERROR` | 清空 `HTTP(S)_PROXY` 后重试；关注上游适配更新 |
 | WorkBuddy `AUTH_*` / 断签 | 桌面端重新登录；`python scripts\signin.py doctor` 体检 |
-| WorkBuddy 成长中心断连签 | 连签只认客户端窗口当天**在前台被刷新过**（常驻进程、03:02 自启、窗口只显示不聚焦都不算）；看 `scripts\streak_launch.log` 与 `python scripts\probe_streak.py`，必要时手动跑一次 `scripts\workbuddy_streak_launch.ps1` |
+| WorkBuddy 成长中心断连签 | 连签只跟随当天的**真实使用**（一次 AI 会话）；客户端启动、常驻、程序化置前都不算。看 `scripts\streak_warmup.log` 与 `python scripts\probe_streak.py`；accessToken 过期（剩不足 0.5 天）时打开客户端续期 |
 | Trae `LOGIN_REQUIRED` | 超过两周未启动 Trae，token 过期；打开一次即可 |
 
 **客户端不运行也能签到吗？** Qoder 与 Trae 可以（纯 HTTP 调用）；WorkBuddy 需要客户端**已安装**（运行时拉起内部辅助进程解密凭据），但 GUI 不必在运行。
@@ -143,7 +142,7 @@ ide-daily-checkin/
 
 ## 文档
 
-- [workbuddy-scheduled-tasks.md](workbuddy-scheduled-tasks.md)：WorkBuddy 原理、任务配置与连签守卫
+- [workbuddy-scheduled-tasks.md](workbuddy-scheduled-tasks.md)：WorkBuddy 原理、任务配置与连签保活
 - [qoder-auto-checkin.md](qoder-auto-checkin.md)：Qoder 原理、部署与已知坑
 - [trae-auto-checkin.md](trae-auto-checkin.md)：Trae 纯 API 方案与服务端字段坑
 - [QODER.md](QODER.md)：Qoder 接口契约、状态机与维护 runbook
