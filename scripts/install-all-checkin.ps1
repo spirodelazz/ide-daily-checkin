@@ -2,6 +2,8 @@
 #
 # Replaces the six per-system scheduled tasks with ONE task "AllAutoCheckin"
 # that runs run_all_checkin.py (pythonw, sequential, all three idempotent).
+# The runner also refreshes the Trae CN login token first when it is about to
+# expire (trae_keepalive.mjs), so a stale token no longer silently breaks checkin.
 #
 # Triggers: daily 10:20 (primary, after Qoder's 10:00 credit refresh)
 #           daily 15:00 / 20:30 (catch-up, independent Daily triggers)
@@ -93,10 +95,10 @@ try {
     }
     $set = New-ScheduledTaskSettingsSet -StartWhenAvailable -Hidden `
             -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries `
-            -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
+            -ExecutionTimeLimit (New-TimeSpan -Minutes 20)
     Register-ScheduledTask -TaskName "AllAutoCheckin" `
         -Action $act -Trigger $tris -Settings $set -Principal $principal `
-        -Description "Unified daily checkin: WorkBuddy + Qoder + Trae CN (all idempotent)" -Force | Out-Null
+        -Description "Unified daily checkin: Trae token keepalive + WorkBuddy + Qoder + Trae CN (all idempotent)" -Force | Out-Null
 } catch {
     Write-Host " failed" -ForegroundColor Red
     Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red

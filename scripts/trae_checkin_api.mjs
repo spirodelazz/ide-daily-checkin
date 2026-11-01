@@ -16,10 +16,9 @@
 //
 // 用法：node trae_checkin_api.mjs [--trigger schedule|poll|manual]
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { loadAuthInfo, deviceIdFromStorage, bj, mask, daysLeft } from './trae_auth.mjs';
 
 const argv = process.argv.slice(2);
 const argValue = (name) => {
@@ -31,54 +30,20 @@ const TRIGGER = argValue('trigger') || 'manual';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const LOG_FILE = path.join(HERE, 'trae_checkin.log');
 
-// ── byteCrypto.js 信封解密（常量与算法均取自 Trae CN 主进程包）──────────
-const NO = 116, OO = 99, RO = 5, $O = 16, MO = 0, LO = 0, Jm = 6, pv = 32, vh = 64, AES128 = 16, IVLEN = 16, PO = 64;
-const qoe = Uint8Array.from([82,9,106,213,48,54,165,56,191,64,163,158,129,243,215,251,124,227,57,130,155,47,255,135,52,142,67,68,196,222,233,203,84,123,148,50,166,194,35,61,238,76,149,11,66,250,195,78,8,46,161,102,40,217,36,178,118,91,162,73,109,139,209,37]);
-const zoe = Uint8Array.from([31,221,168,51,136,7,199,49,177,18,16,89,39,128,236,95,96,81,127,169,25,181,74,13,45,229,122,159,147,201,156,239,160,224,59,77,174,42,245,176,200,235,187,60,131,83,153,97,23,43,4,126,186,119,214,38,225,105,20,99,85,33,12,125]);
-const sha512 = (u8) => new Uint8Array(crypto.createHash('sha512').update(u8).digest());
-
-function decryptBlob(b64) {
-  const t = new Uint8Array(Buffer.from(b64, 'base64'));
-  if (t[0] !== NO || t[1] !== OO || t[2] !== RO || t[3] !== $O || t[4] !== MO || t[5] !== LO) {
-    throw new Error(`信封魔数不匹配: ${[...t.slice(0, 6)]}（Trae 版本可能已更换加密方案）`);
-  }
-  const key32 = t.slice(Jm, Jm + pv); // 32 字节密钥内嵌于头部
-  const n = new Uint8Array(PO + 64);
-  n.set(sha512(key32), 0);
-  n.set(Uint8Array.from(qoe.map((b, i) => b ^ zoe[i])), 64);
-  const c = sha512(n);
-  const d = crypto.createDecipheriv('aes-128-cbc', c.slice(0, AES128), c.slice(AES128, AES128 + IVLEN));
-  const plain = Buffer.concat([d.update(t.slice(pv + Jm)), d.final()]);
-  const u8 = new Uint8Array(plain);
-  for (let i = 0; i < vh; i++) {
-    if (sha512(u8.slice(vh))[i] !== u8[i]) throw new Error('SHA-512 完整性校验失败');
-  }
-  return new TextDecoder().decode(u8.slice(vh));
-}
-
-function loadAuthInfo() {
-  const sj = path.join(os.homedir(), 'AppData', 'Roaming', 'Trae CN', 'User', 'globalStorage', 'storage.json');
-  const data = JSON.parse(fs.readFileSync(sj, 'utf-8'));
-  const blob = data['iCubeAuthInfo://icube.cloudide'];
-  if (!blob) throw new Error('storage.json 中无 iCubeAuthInfo://icube.cloudide（未登录 Trae CN？）');
-  const info = JSON.parse(decryptBlob(blob));
-  if (!info.token || !info.host) throw new Error('解密后的凭据缺少 token/host');
-  return info;
-}
+// 剩余有效期低于该天数即在日志里显式告警（客户端只在 token 剩 ≤300s 或已过期时才续期，
+// 所以"很久没打开 Trae"必然走到过期，提前 N 天给出可操作提示）
+const EXPIRY_WARN_DAYS = 3;
 
 // ── 日志（JSON Lines，风格与 signin.log / qoder_checkin.log 一致）────────
-function bj() {
-  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().replace('T', ' ').slice(0, 19);
-}
+// 每条记录都带上 token 到期信息，便于从日志回溯"什么时候开始失效"
+let TOKEN_FIELDS = {};
 function logRun(rec) {
   try {
-    fs.appendFileSync(LOG_FILE, JSON.stringify({ script: 'trae_checkin_api', time: bj(), trigger: TRIGGER, ...rec }) + '\n', 'utf-8');
+    fs.appendFileSync(LOG_FILE, JSON.stringify({ script: 'trae_checkin_api', time: bj(), trigger: TRIGGER, ...TOKEN_FIELDS, ...rec }) + '\n', 'utf-8');
   } catch (e) {
     console.error('[WARN] 日志写入失败:', e.message);
   }
 }
-
-function mask(s) { return typeof s === 'string' && s.length > 12 ? s.slice(0, 6) + `...(${s.length})` : s; }
 
 // ── 主流程 ───────────────────────────────────────────────
 async function main() {
@@ -92,15 +57,20 @@ async function main() {
   }
 
   const expired = new Date(info.expiredAt).getTime() < Date.now();
-  console.log(`[INFO] token ${mask(info.token)} 到期 ${info.expiredAt}${expired ? '（已过期）' : ''}`);
+  const left = daysLeft(info);
+  TOKEN_FIELDS = { tokenExpiresAt: info.expiredAt, tokenDaysLeft: Number(left.toFixed(1)) };
+  console.log(`[INFO] token ${mask(info.token)} 到期 ${info.expiredAt}（剩 ${left.toFixed(1)} 天）${expired ? '（已过期）' : ''}`);
   console.log(`[INFO] host ${info.host} | userId ${info.userId}`);
+  if (!expired && left < EXPIRY_WARN_DAYS) {
+    console.log(`⚠️ token 剩 ${left.toFixed(1)} 天，Trae 客户端只在临期/过期时才续期；` +
+      `建议先跑 trae_keepalive.mjs 或手动打开一次 Trae`);
+    TOKEN_FIELDS.warn = `token 剩 ${left.toFixed(1)} 天`;
+  }
 
   // x-device-id 必须是客户端真实注册的纯数字设备号（键名 iCubeAuthInfo://icube-dc:<digits>）。
   // 不能用 telemetry.devDeviceId（UUID 格式会被服务端拒绝，返回 9074"当前参与用户太多"——
   // 该文案具有误导性，实际是设备校验不通过，2026-10 起 Trae 收紧了此校验）
-  const STORAGE = JSON.parse(fs.readFileSync(path.join(os.homedir(), 'AppData', 'Roaming', 'Trae CN', 'User', 'globalStorage', 'storage.json'), 'utf-8'));
-  const dcKey = Object.keys(STORAGE).find(k => k.toLowerCase().startsWith('icubeauthinfo://icube-dc:'));
-  const deviceId = dcKey ? dcKey.split(':').pop() : '';
+  const deviceId = deviceIdFromStorage();
   if (!/^\d{12,20}$/.test(deviceId)) throw new Error('未能从 storage.json 提取真实设备号（iCubeAuthInfo://icube-dc:*）');
   const headers = {
     'Content-Type': 'application/json',
@@ -119,7 +89,7 @@ async function main() {
   // token 过期直接判定需登录（打开一次 Trae 客户端即可刷新凭据）
   if (expired) {
     console.log('🔑 token 已过期，请打开一次 Trae CN 客户端（登录态会自动续期）');
-    logRun({ result: 'LOGIN_REQUIRED', msg: `token 过期于 ${info.expiredAt}`, uid: info.userId });
+    logRun({ result: 'LOGIN_REQUIRED', msg: `token 过期于 ${info.expiredAt}（已过期 ${(-left).toFixed(1)} 天）`, uid: info.userId });
     return 3;
   }
 

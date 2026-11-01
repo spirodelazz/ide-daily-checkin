@@ -26,7 +26,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Compile all Python scripts
         run: |
-          python -m py_compile scripts/run_all_checkin.py scripts/qoder_checkin.py scripts/qoder_extract.py scripts/signin.py
+          python -m py_compile scripts/run_all_checkin.py scripts/qoder_checkin.py scripts/qoder_extract.py scripts/signin.py scripts/streak_warmup.py
           echo "All Python scripts compiled OK"
 
   node:
@@ -44,6 +44,8 @@ jobs:
           node-version: '22'
       - name: Syntax-check all JS modules
         run: |
+          node --check scripts/trae_auth.mjs
           node --check scripts/trae_checkin_api.mjs
+          node --check scripts/trae_keepalive.mjs
           node --check scripts/trae_checkin.mjs
           echo "All JS modules OK"

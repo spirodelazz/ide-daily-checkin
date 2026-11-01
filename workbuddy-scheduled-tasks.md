@@ -78,6 +78,8 @@ Register-ScheduledTask -TaskName 'WorkBuddyStreakWarmup' -Action $action -Trigge
 
 CLI 的定位规则（`scripts\streak_warmup.py` 内）：环境变量 `WORKBUDDY_CLI` 优先，其次是 `WORKBUDDY_HOME`、`D:\WorkBuddy`、`C:\Program Files\WorkBuddy`、`%LOCALAPPDATA%\Programs\WorkBuddy` 下的 `resources\app.asar.unpacked\cli\bin\codebuddy`。node 取 `~/.workbuddy/binaries/node/versions/*/node.exe` 中最新的一个，没有再退回 PATH。
 
+bundle 变体按发行版实际产物选择：`dist\codebuddy-headless.js` 或 `dist\codebuddy.js` 存在时用入口的默认分派；只有 `dist\codebuddy-lite-wb.mjs` 时（WorkBuddy 定制精简包，2026-10 起）必须设 `CODEBUDDY_FORCE_LITE_WB_BUNDLE=1`，否则 `bin\codebuddy` 带 `-p` 会分派到 headless 产物并报 `Cannot find module '../dist/codebuddy'`。
+
 ### 公共设置（两个上游任务一致）
 
 - **隐藏任务**：注册时带 `-Hidden` 属性，任务计划程序默认不显示（需「查看 → 显示隐藏的任务」）

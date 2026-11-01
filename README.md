@@ -18,6 +18,7 @@
 ## 功能特性
 
 - **三套一次跑完**：统一任务 `AllAutoCheckin` 顺序执行，每日覆盖 WorkBuddy 积分、Qoder 100 Credits、Trae CN 200 积分。
+- **凭据自保**：Trae 登录态剩不足 3 天时先拉起一次客户端续期再签到，不再因为「忘记打开 Trae」静默断签。
 - **幂等安全**：均为「未领才领」，重复运行不会多领。
 - **成长中心**：WorkBuddy 侧自动领旅行礼物、派 Buddy、领任务奖励、断签补登、连签兑换与盲盒抽奖。
 - **静默运行**：`pythonw` / `wscript` 包装，无窗口无弹窗，结果只写 JSON 行日志。
@@ -30,7 +31,7 @@
 | --- | --- | --- |
 | WorkBuddy | 每日积分 + 成长中心全套 | 桌面端登录写入的加密凭据，运行时经客户端原生接口解密 |
 | Qoder | 100 Credits | `qoder_extract.py` 一次性解密提取（DPAPI + AES-GCM） |
-| Trae CN | 200 积分 | 每次运行实时解密 `storage.json`（自包含信封，无需客户端参与） |
+| Trae CN | 200 积分 | 每次运行实时解密 `storage.json`（自包含信封，无需客户端参与）；token 剩不足 3 天时借助客户端续期 |
 
 各系统的接口契约、任务配置与踩坑记录见[文档](#文档)。
 
@@ -59,7 +60,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install-all-checkin.ps1
 Get-Content scripts\all_checkin.log -Tail 5
 ```
 
-WorkBuddy 与 Trae 没有提取步骤，脚本每次运行自动读取本机客户端凭据。Trae 的 token 由客户端运行时续期，约每两周启动一次 Trae 即可保持登录态。
+WorkBuddy 与 Trae 没有提取步骤，脚本每次运行自动读取本机客户端凭据。Trae 的 token 只有 14 天有效期，且客户端**只在临期（剩 ≤300 秒）或已过期时**才续期——所以「偶尔打开一次」几乎无效。鉴权由主控第一步自动处理：剩余不足 3 天时拉起一次 Trae 完成续期，再签到。
 
 安装脚本支持 `-KeepExisting` 保留已有任务；默认会先注销六个单系统任务。卸载：
 
@@ -83,29 +84,33 @@ powershell -ExecutionPolicy Bypass -File scripts\install-trae-windows.ps1
 | 查 WorkBuddy 状态 | `python scripts\signin.py status` |
 | 查连签天数 | `python scripts\probe_streak.py`（加 `--days` 只输出天数） |
 | 单跑 Trae | `node scripts\trae_checkin_api.mjs --trigger manual` |
+| 查 Trae 凭据剩余天数 | `node scripts\trae_keepalive.mjs --status` |
+| 手动续期 Trae | `node scripts\trae_keepalive.mjs`（加 `--dry-run` 只看会不会动手） |
 | 查任务状态 | `Get-ScheduledTask -TaskName 'AllAutoCheckin'` |
 
 ## 计划任务
 
 | 任务名 | 触发（北京时间） | 内容 |
 | --- | --- | --- |
-| `AllAutoCheckin` | 10:20 主跑，15:00 / 20:30 兜底 | 顺序跑三套签到，时限 15 分钟 |
+| `AllAutoCheckin` | 10:20 主跑，15:00 / 20:30 兜底 | 先做 Trae 凭据续期（临期才动手），再顺序跑三套签到，时限 20 分钟 |
 | `WorkBuddyStreakWarmup` | 每天 10:00，失败当日 18:00 重试 | 连签保活：读桌面端 accessToken，用无头 CLI 跑一次极简会话（`-p "回复ok" --tools ""`），再用探针复核连签天数是否增长；不触碰客户端进程。宿主为 `pythonw.exe`，全程不弹控制台，时限 10 分钟 |
 
-几条设计约定：主跑选 10:20 是因为 Qoder 额度在 10:00（UTC+8）刷新；轮询用多个独立 Daily 触发器而非「重复间隔」（后者错过会永久跳过）；`StartWhenAvailable` 补跑、`IgnoreNew` 防重复实例。任务在任务计划程序中默认为隐藏，需「查看 → 显示隐藏的任务」；任务 XML 里时间是 **UTC**。
+几条设计约定：主跑选 10:20 是因为 Qoder 额度在 10:00（UTC+8）刷新；Trae 续期放在签到之前，过期 token 能在同一次运行里补回；轮询用多个独立 Daily 触发器而非「重复间隔」（后者错过会永久跳过）；`StartWhenAvailable` 补跑、`IgnoreNew` 防重复实例。任务在任务计划程序中默认为隐藏，需「查看 → 显示隐藏的任务」；任务 XML 里时间是 **UTC**。
 
 ## 目录结构
 
 ```
 ide-daily-checkin/
 ├── scripts/
-│   ├── run_all_checkin.py           统一主控（汇总 all_checkin.log）
+│   ├── run_all_checkin.py           统一主控（续期 + 三套签到，汇总 all_checkin.log）
 │   ├── install-all-checkin.ps1      注册统一任务
 │   ├── signin.py                    WorkBuddy 签到
 │   ├── streak_warmup.py             连签保活（无头 CLI 会话 + 复核）
 │   ├── probe_streak.py              连签状态探针（只读）
 │   ├── qoder_checkin.py             Qoder 签到
 │   ├── qoder_extract.py             Qoder 凭据提取
+│   ├── trae_auth.mjs                Trae 凭据读取（解密 + 设备号），被下面两个脚本共用
+│   ├── trae_keepalive.mjs           Trae 登录态续期（临期拉起客户端并复核）
 │   ├── trae_checkin_api.mjs         Trae 签到（纯 API）
 │   └── trae_checkin.mjs             Trae CDP 参考实现
 ├── workbuddy-scheduled-tasks.md     WorkBuddy 详情（原理 / 任务配置）
@@ -119,7 +124,9 @@ ide-daily-checkin/
 
 ## 日志
 
-只需要看 `scripts/all_checkin.log`：每次运行先汇入三套的新增明细行（`script` 字段区分归属），最后一行是汇总。`signin.log` / `qoder_checkin.log` / `trae_checkin.log` 是各脚本原生日志；`streak_warmup.log` 是连签保活的会话与复核过程。
+只需要看 `scripts/all_checkin.log`：每次运行先汇入各步的新增明细行（`script` 字段区分归属），最后一行是汇总。`signin.log` / `qoder_checkin.log` / `trae_checkin.log` 是各脚本原生日志；`trae_keepalive.log` 记 Trae 凭据剩余天数与续期结果；`streak_warmup.log` 是连签保活的会话与复核过程。
+
+Trae 的每条日志都带 `tokenDaysLeft`，凭据到期时间一眼可见。
 
 ## 常见问题
 
@@ -130,7 +137,8 @@ ide-daily-checkin/
 | Qoder 连续 `ERROR` | 清空 `HTTP(S)_PROXY` 后重试；关注上游适配更新 |
 | WorkBuddy `AUTH_*` / 断签 | 桌面端重新登录；`python scripts\signin.py doctor` 体检 |
 | WorkBuddy 成长中心断连签 | 连签只跟随当天的**真实使用**（一次 AI 会话）；客户端启动、常驻、程序化置前都不算。看 `scripts\streak_warmup.log` 与 `python scripts\probe_streak.py`；accessToken 过期（剩不足 0.5 天）时打开客户端续期 |
-| Trae `LOGIN_REQUIRED` | 超过两周未启动 Trae，token 过期；打开一次即可 |
+| Trae `LOGIN_REQUIRED` | token 已过期。`node scripts\trae_keepalive.mjs` 可自动拉起客户端续期；仍失败则手动打开一次 Trae 确认登录态 |
+| Trae `tokenDaysLeft` 持续下降 | 正常（14 天有效期）。低于 3 天时续期步骤会自动接管；想提前处理：`node scripts\trae_keepalive.mjs --threshold 5` |
 
 **客户端不运行也能签到吗？** Qoder 与 Trae 可以（纯 HTTP 调用）；WorkBuddy 需要客户端**已安装**（运行时拉起内部辅助进程解密凭据），但 GUI 不必在运行。
 
@@ -153,8 +161,10 @@ ide-daily-checkin/
 欢迎 Issue 与 PR。改动脚本后至少跑一次语法检查（与 CI 一致）：
 
 ```powershell
-python -m py_compile scripts\run_all_checkin.py scripts\qoder_checkin.py scripts\qoder_extract.py scripts\signin.py
+python -m py_compile scripts\run_all_checkin.py scripts\qoder_checkin.py scripts\qoder_extract.py scripts\signin.py scripts\streak_warmup.py
+node --check scripts\trae_auth.mjs
 node --check scripts\trae_checkin_api.mjs
+node --check scripts\trae_keepalive.mjs
 ```
 
 ## 许可证

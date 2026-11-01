@@ -5,15 +5,22 @@
 ════════════════════════════════════════════════════════════
 一次运行顺序完成三套签到（均幂等，重复运行安全）：
 
+  0. Trae 续期   node trae_keepalive.mjs        （token 临期才拉起客户端续期，否则秒过）
   1. WorkBuddy  pythonw signin.py silent-poll   （补签：未签才签 + 成长中心）
   2. Qoder      pythonw qoder_checkin.py silent （10:00 额度刷新后可领；此前为 pending/已领）
   3. Trae CN    node trae_checkin_api.mjs       （纯 API，本地当日去重）
 
-配套计划任务 AllAutoCheckin：每天 10:20 主跑（Qoder 10:00 刷新后）+ 15:00 / 20:30 兜底。
-三套各自的详细日志仍写入各自文件（signin.log / qoder_checkin.log / trae_checkin.log），
-本脚本额外把汇总结果写一行 JSON 到 all_checkin.log。
+Trae 续期排在签到之前：客户端只在 token 临期/过期时才续期，过期后再签只会反复
+LOGIN_REQUIRED，所以先给一次续期机会，同一次运行里就能补上当天签到。
 
-退出码：0=三套全部成功/已签/待下发，1=任一套失败。
+配套计划任务 AllAutoCheckin：每天 10:20 主跑（Qoder 10:00 刷新后）+ 15:00 / 20:30 兜底。
+各套自身的明细日志写入各自文件（signin.log / qoder_checkin.log / trae_checkin.log /
+trae_keepalive.log），本脚本额外把汇总结果写一行 JSON 到 all_checkin.log。
+
+退出码：0=三套全部成功/已签，1=任一套失败或需要重新登录。
+
+需要重新登录也算非零：凭据过期只在日志里留痕，任务计划程序仍显示"成功"，
+断签就没人发现（2026-10-29 ~ 11-01 Trae token 过期连续四天）。
 """
 import json
 import os
@@ -51,8 +58,13 @@ def find_node():
     return "node"
 
 
-def run_step(name, cmd, timeout, env=None):
-    """返回 (result, detail)。result: ok / fail"""
+def run_step(name, cmd, timeout, env=None, code_map=None):
+    """返回 (result, detail)。result: ok / login_required / fail
+
+    各脚本的退出码语义不同（签到脚本 2=今日已签，续期脚本 2=读不到凭据），
+    故按步骤传入 code_map；未列出的退出码一律记 fail。
+    """
+    codes = code_map or {0: "ok", 2: "ok", 3: "login_required"}
     t0 = time.time()
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
@@ -62,9 +74,8 @@ def run_step(name, cmd, timeout, env=None):
         tail = (p.stdout or "").strip().splitlines()
         tail = [l for l in tail if l.strip()][-2:]
         detail = " | ".join(tail)[:200] or f"exit={p.returncode}"
-        if p.returncode in (0, 2, 3):  # 2=已签 3=需登录（不算脚本失败，单列）
-            tag = {0: "ok", 2: "ok", 3: "login_required"}[p.returncode]
-            return tag, f"exit={p.returncode} {dt}s {detail}"
+        if p.returncode in codes:
+            return codes[p.returncode], f"exit={p.returncode} {dt}s {detail}"
         return "fail", f"exit={p.returncode} {dt}s {detail}"
     except subprocess.TimeoutExpired:
         return "fail", f"timeout>{timeout}s"
@@ -80,6 +91,7 @@ def bj():
 # 各系统脚本仍写各自原生日志（signin.py 是上游代码不动），主控负责搬运，
 # all_checkin.log 由此成为"总览 + 三套明细"的唯一查看入口。
 SYSTEM_LOGS = {
+    "TraeToken": os.path.join(HERE, "trae_keepalive.log"),
     "WorkBuddy": os.path.join(HERE, "signin.log"),
     "Qoder": os.path.join(HERE, "qoder_checkin.log"),
     "TraeCN": os.path.join(HERE, "trae_checkin.log"),
@@ -133,10 +145,15 @@ def main():
     py = sys.executable  # pythonw 下即 pythonw.exe
     node = find_node()
     steps = [
-        ("WorkBuddy", [py, os.path.join(HERE, "signin.py"), "silent-poll"], 420, None),
-        ("Qoder", [py, os.path.join(HERE, "qoder_checkin.py"), "silent"], 120, None),
+        # Trae 续期：token 临期/过期时拉起客户端，等待复核最长 90s；充裕时秒过。
+        # 退出码 2 在此脚本里是"读不到凭据"，等价于需要人工打开客户端。
+        {"name": "TraeToken", "cmd": [node, os.path.join(HERE, "trae_keepalive.mjs"), "--timeout", "90"],
+         "timeout": 150, "env": clean_env(), "codes": {0: "ok", 2: "login_required"}},
+        {"name": "WorkBuddy", "cmd": [py, os.path.join(HERE, "signin.py"), "silent-poll"], "timeout": 420, "env": None},
+        {"name": "Qoder", "cmd": [py, os.path.join(HERE, "qoder_checkin.py"), "silent"], "timeout": 120, "env": None},
         # TraeCN 服务端繁忙时有退避重试（最长约 90s + 请求耗时），放宽超时
-        ("TraeCN", [node, os.path.join(HERE, "trae_checkin_api.mjs"), "--trigger", "schedule"], 300, clean_env()),
+        {"name": "TraeCN", "cmd": [node, os.path.join(HERE, "trae_checkin_api.mjs"), "--trigger", "schedule"],
+         "timeout": 300, "env": clean_env()},
     ]
 
     print("=" * 56)
@@ -144,9 +161,10 @@ def main():
     print("=" * 56)
 
     results = []
-    for name, cmd, timeout, env in steps:
+    for step in steps:
+        name = step["name"]
         offset = _file_size(SYSTEM_LOGS[name])  # 运行前记录各系统日志位置
-        result, detail = run_step(name, cmd, timeout, env)
+        result, detail = run_step(name, step["cmd"], step["timeout"], step["env"], step.get("codes"))
         ship_detail(name, offset)               # 运行后把新增明细搬进 all_checkin.log
         mark = "✅" if result == "ok" else ("🔑" if result == "login_required" else "❌")
         print("  %s %-10s %s" % (mark, name, detail))
@@ -157,6 +175,10 @@ def main():
     bad = sum(1 for r in results if r["result"] == "fail")
     print("-" * 56)
     print("  成功 %d · 需登录 %d · 失败 %d" % (ok, lr, bad))
+    if lr:
+        for r in results:
+            if r["result"] == "login_required":
+                print("  🔑 %s 需要重新登录：打开一次对应客户端即可恢复" % r["name"])
 
     try:
         with open(LOG_FILE, "a", encoding="utf-8") as fh:
@@ -168,7 +190,7 @@ def main():
     except Exception as e:
         print("⚠️ 汇总日志写入失败: %s" % e)
 
-    return 0 if bad == 0 else 1
+    return 0 if (bad == 0 and lr == 0) else 1
 
 
 if __name__ == "__main__":

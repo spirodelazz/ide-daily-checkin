@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-11-01
+
+### Fixed
+
+- Trae 断签 4 天（10-29 ~ 11-01）：token 于 2026-10-29 02:42 过期后每次运行都只报 `LOGIN_REQUIRED`，而主控把 `login_required` 排除在失败之外，任务计划程序始终显示成功。根因是客户端**只在 token 剩 ≤300 秒或已过期时**才续期，10-16 ~ 10-23 的启动全在刷新窗口之外，10-24 之后再没打开过 Trae
+- `run_all_checkin.py` 退出码把 `login_required` 计入失败（只有四步全成功才返回 0），并单独打印需要重新登录的系统
+- `streak_warmup.py` 找不到 CLI 主 bundle：WorkBuddy 改版后 `cli\dist` 只剩 `codebuddy-lite-wb.mjs`，`bin\codebuddy` 带 `-p` 会分派到不存在的 `dist\codebuddy-headless`，报 `Cannot find module '../dist/codebuddy'`。改为按发行版实际产物选择 bundle 变体（`CODEBUDDY_FORCE_LITE_WB_BUNDLE=1`），并在入口与产物不匹配时给出可读提示
+
+### Added
+
+- `scripts\trae_keepalive.mjs`：token 剩余不足 3 天（或已过期）时拉起一次 Trae CN 触发客户端续期，再复核 `storage.json` 的 `expiredAt` 是否变新；客户端已在运行则跳过（它会在临期时自行刷新）
+- `scripts\trae_auth.mjs`：把凭据读取（`storage.json` + 信封解密 + 设备号）抽成共用模块，签到与续期脚本共用
+- `run_all_checkin.py` 新增首步 `TraeToken`——续期排在签到之前，同一次运行即可补上当天；`trae_keepalive.log` 一并汇入 `all_checkin.log`；`AllAutoCheckin` 时限由 15 分钟放宽到 20 分钟
+- `trae_checkin_api.mjs` 每条日志记录 `tokenExpiresAt` / `tokenDaysLeft`，剩余不足 3 天时输出预警
+
+### Notes
+
+- 完全静默续期（不拉 GUI）需要 `POST /trae/api/v3/oauth/ExchangeToken` 的 `DeviceProof{Signature,Timestamp,Nonce}` 签名，密钥是安装时生成并存于 userStorage 的设备 RSA 私钥；该方案未实现，续期仍借助客户端完成
+
 ## 2026-10-24
 
 ### Changed

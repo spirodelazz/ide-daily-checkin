@@ -151,6 +151,23 @@ def find_cli():
     return None
 
 
+def bundle_env(cli):
+    """按发行版实际产物选定 CLI bundle 变体。
+
+    bin/codebuddy 只是入口分派器：带 `-p` 走 headless，否则走 TUI，各自 require
+    dist/codebuddy-headless 与 dist/codebuddy。WorkBuddy 定制包只带精简产物
+    `dist/codebuddy-lite-wb.mjs`，必须用 CODEBUDDY_FORCE_LITE_WB_BUNDLE=1 强制命中，
+    否则会逐级回退到两个都不存在的 bundle，报 `Cannot find module '../dist/codebuddy'`。
+    """
+    dist = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(cli))), "dist")
+    for name in ("codebuddy-headless.js", "codebuddy.js"):
+        if os.path.exists(os.path.join(dist, name)):
+            return {}
+    if os.path.exists(os.path.join(dist, "codebuddy-lite-wb.mjs")):
+        return {"CODEBUDDY_FORCE_LITE_WB_BUNDLE": "1"}
+    return {}
+
+
 def free_port():
     for _ in range(20):
         port = random.randint(51000, 59000)
@@ -194,6 +211,7 @@ def run_cli(node, cli, token, workdir):
         pass
     env = dict(os.environ)
     env["CODEBUDDY_AUTH_TOKEN"] = token
+    env.update(bundle_env(cli))
     node_dir = os.path.dirname(node)
     env["PATH"] = node_dir + os.pathsep + env.get("PATH", "")
     # CREATE_NO_WINDOW：宿主是 pythonw，仍然明确不分配控制台窗口
@@ -220,6 +238,9 @@ def run_cli(node, cli, token, workdir):
         return False, elapsed, "auth"
     if p.returncode != 0 or not out:
         log("CLI 异常 exit=%s out=%r err=%r" % (p.returncode, out[:160], err[:240]))
+        if "Cannot find module" in err or "MODULE_NOT_FOUND" in err:
+            log("CLI 入口与 dist 产物不匹配（WorkBuddy 改版？）：检查 %s/dist 下实际 bundle 名"
+                % os.path.dirname(os.path.dirname(cli)))
         return False, elapsed, "exit=%s" % p.returncode
     return True, elapsed, out.splitlines()[-1][:80]
 
@@ -263,6 +284,9 @@ def main():
         return 4
     log("node=%s" % node)
     log("cli=%s" % cli)
+    variant = bundle_env(cli)
+    if variant:
+        log("bundle=%s（该发行版无 headless/full 产物）" % ",".join("%s=%s" % kv for kv in variant.items()))
 
     workdir = os.path.join(os.path.expanduser("~"), ".workbuddy", "streak-warmup")
     if dry_run:
