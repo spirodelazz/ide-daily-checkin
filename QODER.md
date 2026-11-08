@@ -36,6 +36,8 @@ token 刷新        do_refresh()：POST /api/v1/deviceToken/refresh {"refresh_to
                     2) 临近过期 → do_refresh，成功后持久化
                     3) 收到 401 → ensure_token(force=True) 强刷后重试一次
                   run_account() 状态机：claimed / already / pending / login_required / error
+                  查不到 CLAIM_BENEFIT 活动时按 pending 处理，并在本次运行内重查
+                  （默认 3 次 × 20 秒，env QODER_EMPTY_RETRY / QODER_EMPTY_WAIT 可覆盖）
 输出              push()（企业微信/PushPlus/Webhook，配置留空即关）+ log_run()（JSON 行落盘）
 入口              main(argv)：silent / silent-poll / poll（仅影响日志 trigger 字段）；
                   pythonw 下 stdout 为 None 已兜底；顶层 try/except 保证异常也落日志
@@ -46,8 +48,8 @@ token 刷新        do_refresh()：POST /api/v1/deviceToken/refresh {"refresh_to
 | phase | 触发条件 | 后续 |
 |---|---|---|
 | `claimed` | claim 返回 200 且 status=CLAIMED | 完成，credits 累加 |
-| `already` | 活动已 CLAIMED（在 startAt~endAt 内）或活动列表为空 | 无需处理 |
-| `pending` | 有 CLAIM_BENEFIT 活动但均非 CLAIMABLE（每日未下发） | 等轮询兜底 |
+| `already` | 活动已 CLAIMED（在 startAt~endAt 内） | 无需处理 |
+| `pending` | 无 CLAIM_BENEFIT 活动（重查满次数仍为空），或有活动但均非 CLAIMABLE | 等 15:00 / 20:30 兜底轮次 |
 | `login_required` | 401 且强刷失败 | 重跑 qoder_extract.py |
 | `error` | HTTP 非 200/401、claim 部分失败、本地异常 | 看 msg 字段定位 |
 

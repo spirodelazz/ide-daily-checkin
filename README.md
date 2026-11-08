@@ -95,7 +95,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install-trae-windows.ps1
 | `AllAutoCheckin` | 10:20 主跑，15:00 / 20:30 兜底 | 先做 Trae 凭据续期（临期才动手），再顺序跑三套签到，时限 20 分钟 |
 | `WorkBuddyStreakWarmup` | 每天 10:00，失败当日 18:00 重试 | 连签保活：读桌面端 accessToken，用无头 CLI 跑一次极简会话（`-p "回复ok" --tools ""`），再用探针复核连签天数是否增长；不触碰客户端进程。宿主为 `pythonw.exe`，全程不弹控制台，时限 10 分钟 |
 
-几条设计约定：主跑选 10:20 是因为 Qoder 额度在 10:00（UTC+8）刷新；Trae 续期放在签到之前，过期 token 能在同一次运行里补回；轮询用多个独立 Daily 触发器而非「重复间隔」（后者错过会永久跳过）；`StartWhenAvailable` 补跑、`IgnoreNew` 防重复实例。任务在任务计划程序中默认为隐藏，需「查看 → 显示隐藏的任务」；任务 XML 里时间是 **UTC**。
+几条设计约定：主跑选 10:20 是因为 Qoder 额度在 10:00（UTC+8）刷新；查不到活动时 Qoder 会在本次运行内重查（3 次 × 20 秒），空列表一律按「未下发」处理，绝不当作「已领取」；Trae 续期放在签到之前，过期 token 能在同一次运行里补回；轮询用多个独立 Daily 触发器而非「重复间隔」（后者错过会永久跳过）；`StartWhenAvailable` 补跑、`IgnoreNew` 防重复实例。任务在任务计划程序中默认为隐藏，需「查看 → 显示隐藏的任务」；任务 XML 里时间是 **UTC**。
 
 ## 目录结构
 

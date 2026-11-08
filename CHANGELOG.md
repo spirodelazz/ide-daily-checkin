@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-08
+
+### Fixed
+
+- Qoder 空活动列表被当成「今日已领取」：`run_account()` 在 `campaigns` 里查不到 `CLAIM_BENEFIT` 时归 `already`，而 `already` 在下游等价于成功（退出码 0、汇总 `ok`），于是 10:20 那轮既没领到也没重试、也没告警。11-08 当天据此漏签，靠手动补跑才领到 +100 Credits；10-20、11-01 的 10:20 同样命中，只是被 15:00 兜底轮次掩盖
+- 空列表改判 `pending`，msg 附带本次连查次数；`already` 只保留「活动已 CLAIMED 且在 startAt~endAt 内」一种含义
+
+### Added
+
+- `run_account()` 在查不到 `CLAIM_BENEFIT` 活动时于本次运行内重查：默认 3 次、间隔 20 秒（`QODER_EMPTY_RETRY` / `QODER_EMPTY_WAIT` 可覆盖），活动列表抽出来后立即继续领取，不再干等到 15:00 兜底轮次
+- `query_campaigns()`：把活动列表查询与 401 强刷重试抽成独立函数，重查与首次查询共用同一套 token 处理
+
+### Notes
+
+- 每日活动的 `startAt` 固定为 10:00（UTC+8），但接口在刷新前后会返回空列表；`claim` 本身幂等，重查不会重复发币
+
 ## 2026-11-01
 
 ### Fixed

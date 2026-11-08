@@ -14,6 +14,8 @@ Qoder 每日自动签到 · qoder_checkin.py
   · 文件名加 qoder_ 前缀，避免与 signin.py 的文件混淆
   · pythonw（无控制台）下安全运行；每次运行追加一行 JSON 到 qoder_checkin.log
   · claim 幂等，重复运行不会重复发币
+  · 活动列表查不到 CLAIM_BENEFIT 时按「未下发」处理并在本次运行内重查（见 empty_retry_plan），
+    不把空列表当「今日已领取」——每日活动刚刷新时接口有短暂抖动
 
 用法：
     python qoder_checkin.py               # 手动前台跑一次
@@ -54,6 +56,10 @@ UA = "Qoder/claim"
 PATH_CAMPAIGNS = "/sash/api/v1/me/campaigns"
 PATH_CLAIM = "/sash/api/v1/me/campaigns/{cid}/claim"
 PATH_REFRESH = "/api/v1/deviceToken/refresh"
+
+# 活动列表为空时的重查：每日活动在 10:00 刷新前后可能短暂查不到，一次空列表不足以下结论
+EMPTY_RETRY_TIMES = 3
+EMPTY_RETRY_WAIT = 20
 
 QYWX_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key="
 PUSHPLUS_URL = "https://www.pushplus.plus/send"
@@ -125,6 +131,16 @@ def refresh_margin():
         return int(CONFIG.get("refreshMarginH", 72))
     except (TypeError, ValueError):
         return 72
+
+
+def empty_retry_plan():
+    """(重查次数, 间隔秒)。env QODER_EMPTY_RETRY / QODER_EMPTY_WAIT 可覆盖。"""
+    def _int(env, default):
+        try:
+            return int(os.getenv(env, "").strip() or default)
+        except (TypeError, ValueError):
+            return default
+    return max(1, _int("QODER_EMPTY_RETRY", EMPTY_RETRY_TIMES)), max(0, _int("QODER_EMPTY_WAIT", EMPTY_RETRY_WAIT))
 
 
 def device_headers():
@@ -427,6 +443,16 @@ def _fmt(v):
         return str(v)
 
 
+def query_campaigns(acc):
+    """GET 活动列表；401 时强刷 token 再试一次。返回 (status, data)。"""
+    status, data, _ = api_call(PATH_CAMPAIGNS, token=acc["accessToken"])
+    if status == 401:
+        ok2, _ = ensure_token(acc, force=True)
+        if ok2:
+            status, data, _ = api_call(PATH_CAMPAIGNS, token=acc["accessToken"])
+    return status, data
+
+
 def run_account(acc):
     name = acc.get("name") or acc.get("uid") or _acct_key(acc)
     r = {"name": name, "uid": acc.get("uid") or "-", "phase": "error", "msg": "", "credits": 0}
@@ -437,24 +463,29 @@ def run_account(acc):
         r["msg"] = msg
         return r
 
-    status, data, _ = api_call(PATH_CAMPAIGNS, token=acc["accessToken"])
-    if status == 401:
-        ok2, _ = ensure_token(acc, force=True)
-        if ok2:
-            status, data, _ = api_call(PATH_CAMPAIGNS, token=acc["accessToken"])
-    if status == 401:
-        r["phase"] = "login_required"
-        r["msg"] = "token 无效且刷新失败，请重新提取（qoder_extract.py）"
-        return r
-    if status != 200 or not isinstance(data, dict):
-        r["phase"] = "error"
-        r["msg"] = "查询失败 HTTP %s: %s" % (status, str(data)[:120])
-        return r
+    times, wait = empty_retry_plan()
+    benefits, used = [], 0
+    for attempt in range(1, times + 1):
+        used = attempt
+        status, data = query_campaigns(acc)
+        if status == 401:
+            r["phase"] = "login_required"
+            r["msg"] = "token 无效且刷新失败，请重新提取（qoder_extract.py）"
+            return r
+        if status != 200 or not isinstance(data, dict):
+            r["phase"] = "error"
+            r["msg"] = "查询失败 HTTP %s: %s" % (status, str(data)[:120])
+            return r
+        campaigns = data.get("campaigns")
+        if not isinstance(campaigns, list):
+            campaigns = []
+        benefits = [c for c in campaigns if isinstance(c, dict) and c.get("actionType") == "CLAIM_BENEFIT"]
+        if benefits or attempt == times:
+            break
+        # 空列表 ≠ 今日已领：每日活动刚刷新时可能短暂查不到，稍等重查
+        if wait:
+            time.sleep(wait)
 
-    campaigns = data.get("campaigns")
-    if not isinstance(campaigns, list):
-        campaigns = []
-    benefits = [c for c in campaigns if isinstance(c, dict) and c.get("actionType") == "CLAIM_BENEFIT"]
     claimable = [c for c in benefits if c.get("claimStatus") == "CLAIMABLE"]
 
     if claimable:
@@ -490,8 +521,8 @@ def run_account(acc):
         r["msg"] = "今日已领取"
         return r
     if not benefits:
-        r["phase"] = "already"
-        r["msg"] = "活动列表为空（活动结束或未开放）"
+        r["phase"] = "pending"
+        r["msg"] = "活动列表为空（未下发或上游抖动，已连查 %d 次），等下轮" % used
         return r
     r["phase"] = "pending"
     r["msg"] = "活动未下发，等下轮"

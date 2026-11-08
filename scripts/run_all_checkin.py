@@ -7,7 +7,7 @@
 
   0. Trae 续期   node trae_keepalive.mjs        （token 临期才拉起客户端续期，否则秒过）
   1. WorkBuddy  pythonw signin.py silent-poll   （补签：未签才签 + 成长中心）
-  2. Qoder      pythonw qoder_checkin.py silent （10:00 额度刷新后可领；此前为 pending/已领）
+  2. Qoder      pythonw qoder_checkin.py silent （10:00 额度刷新后可领；查不到活动时本次运行内重查）
   3. Trae CN    node trae_checkin_api.mjs       （纯 API，本地当日去重）
 
 Trae 续期排在签到之前：客户端只在 token 临期/过期时才续期，过期后再签只会反复
