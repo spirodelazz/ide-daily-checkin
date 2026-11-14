@@ -87,6 +87,12 @@ NETWORK_RETRY_DELAYS = (5, 15, 30, 60, 90)
 # 5xx 是服务端抖动，不是本机网络没就绪，短促重试即可——干等几分钟既救不了它，
 # 还会把预算耗光，让后面的成长中心一个都跑不成。
 SERVER_RETRY_DELAYS = (3, 10)
+
+# 成长中心里"已接单但进度没满"的任务（例如分享技能给好友）需要真人动手，脚本无权
+# 代领。这类项每轮落到这个文件，供主控写进汇总行：轮询空跑不写日志行，只靠日志会
+# 丢掉最新快照。路径与脚本同级，已在 .gitignore 排除。
+PENDING_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".pending_manual.json")
+
 _started_at = None
 _budget_seconds = DEFAULT_BUDGET_SECONDS
 _config_warning = None   # 配置非法时的告警，由 emit 统一带进输出
@@ -1049,6 +1055,7 @@ def run_growth(headers, endpoint):
     failures = 0        # 全部失败项，仅用于汇报
     hard_failures = 0   # 其中"需要关注"的那些，只有它们影响退出码
     successes = 0
+    manual = []         # 需要真人动手、脚本无权代做的任务，只汇报不尝试
 
     def _check_auth(code):
         """已知业务 403 由调用方先处理，其余认证/权限拒绝结束本轮。"""
@@ -1168,6 +1175,23 @@ def run_growth(headers, endpoint):
                 #   领奖 POST /tasks/{task_code}/claim   ← 路径带 code、body 空
                 #        （旧版拿 /tasks/accept 当领奖用，同样 400）
                 titles = {t.get("task_code"): t.get("title", t.get("task_code")) for t in tasks}
+                # 需要真人动手的任务只能汇报：进度停在 0/1 是因为动作本身得由人做
+                # （例如"分享一个技能给好友"要真的发给一个人）。硬编一个上报请求
+                # 等于伪造社交行为，脚本不碰；把标题、进度、截止时间和入口带出来，
+                # 让人一分钟内能手动补掉。
+                for t in tasks:
+                    if t.get("locked") or not t.get("has_reward"):
+                        continue
+                    if t.get("accept_status") not in ("accepted", "in_progress"):
+                        continue
+                    pr = t.get("progress") or {}
+                    cur, tgt = as_int(pr.get("current")), as_int(pr.get("target"))
+                    if tgt and cur < tgt:
+                        manual.append({"code": t.get("task_code"),
+                                       "title": titles.get(t.get("task_code")),
+                                       "progress": "%s/%s" % (cur, tgt),
+                                       "deadline": t.get("valid_end"),
+                                       "open": t.get("jump_url")})
                 pending = [t.get("task_code") for t in tasks
                            if t.get("task_code") and not t.get("locked")
                            and t.get("accept_status") == "not_accepted"]
@@ -1466,6 +1490,11 @@ def run_growth(headers, endpoint):
         report = "成长中心各步骤均失败"
     else:
         report = "成长中心无可领取项"
+    if manual:
+        report += "；待人工：%s" % "、".join(
+            "%s %s%s" % (m.get("title") or m.get("code"), m["progress"],
+                         "（%s 截止）" % str(m["deadline"])[:10] if m.get("deadline") else "")
+            for m in manual)
     if tail:
         report += "（%s）" % "，".join(tail)
 
@@ -1477,7 +1506,8 @@ def run_growth(headers, endpoint):
     idle = (successes == 0 and failures == 0)
     return result_code, {"result": "GROWTH", "report": report, "credits_gained": credits_gained,
                          "energy": energy, "streak_days": streak_days, "idle": idle,
-                         **({"failures": failures} if failures else {})}
+                         **({"failures": failures} if failures else {}),
+                         **({"manual_pending": manual} if manual else {})}
 
 
 def run_auto(headers, endpoint):
@@ -1575,6 +1605,19 @@ def run_auto(headers, endpoint):
     }
 
 
+def save_pending(items):
+    """把需要真人动手的任务落到状态文件，供主控 run_all_checkin.py 汇总。
+
+    写不进去只影响汇总展示，不能拖累签到本身，因此吞掉 IO 异常。
+    """
+    try:
+        with open(PENDING_PATH, "w", encoding="utf-8") as fh:
+            json.dump({"savedAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                       "items": items or []}, fh, ensure_ascii=False)
+    except OSError:
+        pass
+
+
 def run_daily(headers, endpoint):
     """一轮完整的日常：查状态→未签才领→再跑成长中心。返回 (退出码, 输出, 是否空跑)。
 
@@ -1608,6 +1651,13 @@ def run_daily(headers, endpoint):
                           "report": "成长中心异常（%s: %s）" % (type(e).__name__, e)}
     out["growth"] = gout.get("report")
     out["growth_result"] = gout.get("result")
+    # 待人工项透传到最外层，计划任务那一行日志里就能看到，不必再翻 growth 文本
+    if gout.get("manual_pending"):
+        out["manual_pending"] = gout["manual_pending"]
+    # 只有跑完整轮（result=GROWTH）才刷新快照：中途异常或预算耗尽时拿到的
+    # 是残缺视图，写进去会把上一轮有效的待人工项误清空。
+    if gout.get("result") == "GROWTH":
+        save_pending(gout.get("manual_pending"))
     if gout.get("credits_gained"):
         out["report"] += "；" + gout["report"]
     # run_growth 只在"确有硬失败且一件都没成"时返回非 0（无可领取项、4xx 业务规则

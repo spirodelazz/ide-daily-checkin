@@ -13,9 +13,9 @@
 Trae 续期排在签到之前：客户端只在 token 临期/过期时才续期，过期后再签只会反复
 LOGIN_REQUIRED，所以先给一次续期机会，同一次运行里就能补上当天签到。
 
-配套计划任务 AllAutoCheckin：每天 10:20 主跑（Qoder 10:00 刷新后）+ 15:00 / 20:30 兜底。
-各套自身的明细日志写入各自文件（signin.log / qoder_checkin.log / trae_checkin.log /
-trae_keepalive.log），本脚本额外把汇总结果写一行 JSON 到 all_checkin.log。
+配套计划任务 AllAutoCheckin：每天 10:20 主跑（Qoder 10:00 刷新后）+ 12:20 / 14:20 收旅行礼物
++ 15:00 / 20:30 兜底。各套自身的明细日志写入各自文件（signin.log / qoder_checkin.log /
+trae_checkin.log / trae_keepalive.log），本脚本额外把汇总结果写一行 JSON 到 all_checkin.log。
 
 退出码：0=三套全部成功/已签，1=任一套失败或需要重新登录。
 
@@ -96,6 +96,8 @@ SYSTEM_LOGS = {
     "Qoder": os.path.join(HERE, "qoder_checkin.log"),
     "TraeCN": os.path.join(HERE, "trae_checkin.log"),
 }
+# signin.py 每轮写的"待人工"快照（空也写，做完自然清空）
+PENDING_FILE = os.path.join(HERE, ".pending_manual.json")
 
 
 def _file_size(path):
@@ -141,6 +143,25 @@ def ship_detail(system, offset):
     return new_offset
 
 
+def last_manual_pending():
+    """读 signin.py 落下的待人工项（已接单但进度没满、需真人动手的任务）。
+
+    不能从 signin.log 里捞：轮询空跑不写日志行，日志里只会是上一次真正落盘的内容。
+    只认当天的快照，过期的一律忽略，避免拿几天前的清单说事。
+    """
+    try:
+        with open(PENDING_FILE, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    if not str(data.get("savedAt") or "").startswith(bj()[:10]):
+        return []
+    items = data.get("items")
+    return items if isinstance(items, list) else []
+
+
 def main():
     py = sys.executable  # pythonw 下即 pythonw.exe
     node = find_node()
@@ -180,12 +201,18 @@ def main():
             if r["result"] == "login_required":
                 print("  🔑 %s 需要重新登录：打开一次对应客户端即可恢复" % r["name"])
 
+    pending = last_manual_pending()
+    if pending:
+        print("  📌 待人工：%s" % "、".join(
+            "%s %s" % (p.get("title") or p.get("code"), p.get("progress")) for p in pending))
+
     try:
         with open(LOG_FILE, "a", encoding="utf-8") as fh:
             fh.write(json.dumps({
                 "time": bj(), "script": "run_all_checkin", "trigger": "schedule",
                 "summary": {"ok": ok, "login_required": lr, "failed": bad},
                 "results": results,
+                **({"pending_manual": pending} if pending else {}),
             }, ensure_ascii=False) + "\n")
     except Exception as e:
         print("⚠️ 汇总日志写入失败: %s" % e)

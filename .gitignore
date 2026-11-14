@@ -7,6 +7,8 @@ scripts/.qoder_token_cache.json
 scripts/*.log
 # 连签保活的当天状态（本机运行产物）
 scripts/.streak_state.json
+# 待人工完成任务的快照（每轮重写，本机运行产物）
+scripts/.pending_manual.json
 
 # Python
 __pycache__/
