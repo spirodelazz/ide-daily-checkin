@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-14
+
+### Added
+
+- `signin.py` 每轮扫 `/growth/tasks`，把「已接单但进度未满」的任务写进日志字段 `manual_pending`（`code` / `title` / `progress` / `deadline` / `open` 入口）与快照 `.pending_manual.json`，报告末尾追加「待人工：…」；`run_all_checkin.py` 读快照写进汇总行的 `pending_manual`，前台运行时同时打印一行。这类任务（如「分享一个技能给好友」）的判定前提是真人完成动作，脚本只汇报不代领
+
+### Changed
+
+- `AllAutoCheckin` 增加 12:20 / 14:20 两个 Daily 触发器：主跑 10:20 派出的 Buddy 要 2~4 小时才到达，原先只靠 15:00 那轮领旅行礼物，界面上待领取最长挂约 2.7 小时；`install-all-checkin.ps1` 同步注册五个时点（10:20 / 12:20 / 14:20 / 15:00 / 20:30）
+- 重写 `workbuddy-scheduled-tasks.md`：任务总览改为实际注册的 `AllAutoCheckin`（10:20 主跑，12:20 / 14:20 收旅行礼物，15:00 / 20:30 兜底）与 `WorkBuddyStreakWarmup`（10:00 / 18:00）；上游 `WorkBuddyAutoSignin`（00:05）与 `WorkBuddyGrowthPoll`（01/05/09/13/17/21 点）标注为未注册，并给出可选的单独注册途径
+- 新增「签到与成长中心：自动领哪些、哪些领不到」与「两个连签不是同一个数」两张表；README 功能特性、单系统部署说明与常见问题同步
+- README 明确 WorkBuddy 单系统任务归上游 `install-windows.ps1` 注册，本仓库不收录该脚本，默认部署不注册它们
+
+### Notes
+
+- 2026-11-13 客户端升级到 5.11.3（Electron 37.10.3）后签到链路实测未受影响：11-14 10:20 签到 +100、签到连签 46 天；`signin.py doctor` 报 `AUTH_READY`（`credential_format=sym-v1`，runtime `D:\WorkBuddy\WorkBuddy.exe`）；连签保活 10:00 记账成功（13→14）。`cli\dist` 仍只有 `codebuddy-lite-wb.mjs`，`CODEBUDDY_FORCE_LITE_WB_BUNDLE=1` 分支继续生效
+- 成长中心界面残留的未领取项不是故障：`skill_share` 一类任务需要真人操作（脚本只接单）、能量 8 < 开盒成本 10、28 天档未解锁、抽奖次数 0
+
 ## 2026-11-08
 
 ### Fixed

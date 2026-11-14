@@ -20,7 +20,7 @@
 - **三套一次跑完**：统一任务 `AllAutoCheckin` 顺序执行，每日覆盖 WorkBuddy 积分、Qoder 100 Credits、Trae CN 200 积分。
 - **凭据自保**：Trae 登录态剩不足 3 天时先拉起一次客户端续期再签到，不再因为「忘记打开 Trae」静默断签。
 - **幂等安全**：均为「未领才领」，重复运行不会多领。
-- **成长中心**：WorkBuddy 侧自动领旅行礼物、派 Buddy、领任务奖励、断签补登、连签兑换与盲盒抽奖。
+- **成长中心**：WorkBuddy 侧自动领旅行礼物、派 Buddy、领任务奖励、断签补登、连签兑换与盲盒抽奖。需要真人动作的任务（如「分享一个技能给好友」）只接单不代做，实物奖只提醒不代填地址——所以界面上偶尔仍有红点属正常，判定标准见[文档](workbuddy-scheduled-tasks.md#签到与成长中心自动领哪些哪些领不到)。
 - **静默运行**：`pythonw` / `wscript` 包装，无窗口无弹窗，结果只写 JSON 行日志。
 - **健壮**：错过补跑、防重复实例、单系统超时隔离、网络退避重试。
 - **凭据自管理**：Qoder token 到期前 72 小时自动刷新；仓库不含任何密钥。
@@ -53,7 +53,7 @@ cd ide-daily-checkin
 # ① 提取 Qoder 凭据（只需一次；须用登录 Qoder 的同一 Windows 用户运行）
 python scripts\qoder_extract.py
 
-# ② 注册统一计划任务（每天 10:20 主跑，15:00 / 20:30 兜底）
+# ② 注册统一计划任务（每天 10:20 主跑，12:20 / 14:20 收旅行礼物，15:00 / 20:30 兜底）
 powershell -ExecutionPolicy Bypass -File scripts\install-all-checkin.ps1
 
 # ③ 查看结果
@@ -75,6 +75,8 @@ powershell -ExecutionPolicy Bypass -File scripts\install-qoder-windows.ps1
 powershell -ExecutionPolicy Bypass -File scripts\install-trae-windows.ps1
 ```
 
+WorkBuddy 的单系统任务（`WorkBuddyAutoSignin` 每日 00:05、`WorkBuddyGrowthPoll` 每日 01/05/09/13/17/21 点）由上游仓库的 `install-windows.ps1` 注册，本仓库不收录该脚本，默认部署也不注册它们——签到统一走 `AllAutoCheckin`。要单独开启整点高频轮询，见 [workbuddy-scheduled-tasks.md](workbuddy-scheduled-tasks.md#单系统任务未注册)。
+
 ## 使用
 
 | 操作 | 命令 |
@@ -83,6 +85,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install-trae-windows.ps1
 | 前台看输出 | `python scripts\run_all_checkin.py` |
 | 查 WorkBuddy 状态 | `python scripts\signin.py status` |
 | 查连签天数 | `python scripts\probe_streak.py`（加 `--days` 只输出天数） |
+| 看待人工任务 | `Get-Content scripts\all_checkin.log -Tail 1 \| ConvertFrom-Json \| Select-Object -ExpandProperty pending_manual` |
 | 单跑 Trae | `node scripts\trae_checkin_api.mjs --trigger manual` |
 | 查 Trae 凭据剩余天数 | `node scripts\trae_keepalive.mjs --status` |
 | 手动续期 Trae | `node scripts\trae_keepalive.mjs`（加 `--dry-run` 只看会不会动手） |
@@ -92,10 +95,10 @@ powershell -ExecutionPolicy Bypass -File scripts\install-trae-windows.ps1
 
 | 任务名 | 触发（北京时间） | 内容 |
 | --- | --- | --- |
-| `AllAutoCheckin` | 10:20 主跑，15:00 / 20:30 兜底 | 先做 Trae 凭据续期（临期才动手），再顺序跑三套签到，时限 20 分钟 |
+| `AllAutoCheckin` | 10:20 主跑，12:20 / 14:20 收旅行礼物，15:00 / 20:30 兜底 | 先做 Trae 凭据续期（临期才动手），再顺序跑三套签到，时限 20 分钟 |
 | `WorkBuddyStreakWarmup` | 每天 10:00，失败当日 18:00 重试 | 连签保活：读桌面端 accessToken，用无头 CLI 跑一次极简会话（`-p "回复ok" --tools ""`），再用探针复核连签天数是否增长；不触碰客户端进程。宿主为 `pythonw.exe`，全程不弹控制台，时限 10 分钟 |
 
-几条设计约定：主跑选 10:20 是因为 Qoder 额度在 10:00（UTC+8）刷新；查不到活动时 Qoder 会在本次运行内重查（3 次 × 20 秒），空列表一律按「未下发」处理，绝不当作「已领取」；Trae 续期放在签到之前，过期 token 能在同一次运行里补回；轮询用多个独立 Daily 触发器而非「重复间隔」（后者错过会永久跳过）；`StartWhenAvailable` 补跑、`IgnoreNew` 防重复实例。任务在任务计划程序中默认为隐藏，需「查看 → 显示隐藏的任务」；任务 XML 里时间是 **UTC**。
+几条设计约定：主跑选 10:20 是因为 Qoder 额度在 10:00（UTC+8）刷新；12:20 / 14:20 两轮专收旅行礼物——Buddy 在主跑时派出，要 2~4 小时才到达，只靠 15:00 那轮会让界面上挂着待领取最长达 2.7 小时；查不到活动时 Qoder 会在本次运行内重查（3 次 × 20 秒），空列表一律按「未下发」处理，绝不当作「已领取」；Trae 续期放在签到之前，过期 token 能在同一次运行里补回；轮询用多个独立 Daily 触发器而非「重复间隔」（后者错过会永久跳过）；`StartWhenAvailable` 补跑、`IgnoreNew` 防重复实例。任务在任务计划程序中默认为隐藏，需「查看 → 显示隐藏的任务」；任务 XML 里时间是 **UTC**。
 
 ## 目录结构
 
@@ -120,7 +123,7 @@ ide-daily-checkin/
 └── CHANGELOG.md
 ```
 
-凭据（`qoder_config.json`、`qoder_accounts.json`、`.qoder_token_cache.json`）、全部 `*.log` 与保活状态 `.streak_state.json` 已在 `.gitignore` 中排除。
+凭据（`qoder_config.json`、`qoder_accounts.json`、`.qoder_token_cache.json`）、全部 `*.log` 与运行状态（`.streak_state.json`、`.pending_manual.json`）已在 `.gitignore` 中排除。
 
 ## 日志
 
@@ -136,6 +139,9 @@ Trae 的每条日志都带 `tokenDaysLeft`，凭据到期时间一眼可见。
 | Qoder `PENDING` | 每日活动未下发，等后续轮询兜底 |
 | Qoder 连续 `ERROR` | 清空 `HTTP(S)_PROXY` 后重试；关注上游适配更新 |
 | WorkBuddy `AUTH_*` / 断签 | 桌面端重新登录；`python scripts\signin.py doctor` 体检 |
+| WorkBuddy 凌晨显示「今日未签到」 | 正常：签到在主跑 10:20，15:00 / 20:30 兜底，零点不跑 |
+| WorkBuddy 成长中心仍有未领取项 | 真人任务、能量不足（低于 `cost_per_open`）、档位未解锁、抽奖次数为 0、旅行在途——均属预期。`signin.log` 里 `growth_result=GROWTH` 且无「失败」二字即脚本正常；需要你亲自动手的任务会列在汇总行的 `pending_manual` 里 |
+| 成长中心连签 ≠ 签到连签 | 两个独立计数：签到连签按天签到累加，成长中心连签要当天有一次真实 AI 会话，客户端成长页显示的是后者 |
 | WorkBuddy 成长中心断连签 | 连签只跟随当天的**真实使用**（一次 AI 会话）；客户端启动、常驻、程序化置前都不算。看 `scripts\streak_warmup.log` 与 `python scripts\probe_streak.py`；accessToken 过期（剩不足 0.5 天）时打开客户端续期 |
 | Trae `LOGIN_REQUIRED` | token 已过期。`node scripts\trae_keepalive.mjs` 可自动拉起客户端续期；仍失败则手动打开一次 Trae 确认登录态 |
 | Trae `tokenDaysLeft` 持续下降 | 正常（14 天有效期）。低于 3 天时续期步骤会自动接管；想提前处理：`node scripts\trae_keepalive.mjs --threshold 5` |
