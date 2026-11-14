@@ -16,9 +16,19 @@ jobs:
     timeout-minutes: 5
     strategy:
       fail-fast: false
+      # ubuntu-latest 已迁移到 24.04/26.04，setup-python 在这些镜像上没有 3.9 的
+      # toolcache 构建（报 "The version '3.9' ... was not found for Ubuntu 26.04"），
+      # 所以 3.9 固定跑在仍有 3.9 的 ubuntu-22.04 上，其余组合跟 latest。
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        python: ['3.9', '3.13']
+        include:
+          - os: ubuntu-22.04
+            python: '3.9'
+          - os: ubuntu-latest
+            python: '3.13'
+          - os: windows-latest
+            python: '3.9'
+          - os: windows-latest
+            python: '3.13'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
