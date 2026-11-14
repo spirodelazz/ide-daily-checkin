@@ -6,6 +6,8 @@
 # expire (trae_keepalive.mjs), so a stale token no longer silently breaks checkin.
 #
 # Triggers: daily 10:20 (primary, after Qoder's 10:00 credit refresh)
+#           daily 12:20 / 14:20 (claim the Buddy travel reward that only becomes
+#                                available 1-4h after departing at 10:20)
 #           daily 15:00 / 20:30 (catch-up, independent Daily triggers)
 #
 # Old tasks removed by default (re-installable anytime via the per-system
@@ -89,8 +91,10 @@ try {
     $act = New-ScheduledTaskAction -Execute $pythonw -Argument "`"$runner`"" -WorkingDirectory $PSScriptRoot
     # Independent Daily triggers (missed repetitions are skipped forever;
     # missed independent triggers catch up on next boot via StartWhenAvailable)
+    # 12:20 / 14:20 专收旅行礼物：主跑 10:20 派出后，Buddy 需 1~4 小时才到达，
+    # 只看 15:00 那轮会让界面上挂着待领取最长达 2.7 小时。
     $tris = @()
-    foreach ($hh in @("10:20", "15:00", "20:30")) {
+    foreach ($hh in @("10:20", "12:20", "14:20", "15:00", "20:30")) {
         $tris += New-ScheduledTaskTrigger -Daily -At $hh
     }
     $set = New-ScheduledTaskSettingsSet -StartWhenAvailable -Hidden `
@@ -111,7 +115,7 @@ Write-Host ""
 Write-Host "Unified task registered:" -ForegroundColor Green
 $t = Get-ScheduledTask -TaskName "AllAutoCheckin"
 $i = Get-ScheduledTaskInfo -TaskName "AllAutoCheckin"
-Write-Host ("  AllAutoCheckin  {0}  daily 10:20 / 15:00 / 20:30" -f $t.State)
+Write-Host ("  AllAutoCheckin  {0}  daily 10:20 / 12:20 / 14:20 / 15:00 / 20:30" -f $t.State)
 Write-Host ("  next run {0}" -f $i.NextRunTime) -ForegroundColor DarkGray
 
 Write-Host ""
