@@ -11,36 +11,26 @@
 
 </div>
 
-用一个 Windows 计划任务，在每天固定时点静默完成 WorkBuddy（腾讯）、Qoder（阿里）、Trae CN（字节）三个 AI IDE 的每日签到与积分领取。全程无窗口、幂等、错过时点开机后自动补跑。
+用一个 Windows 计划任务，在每天固定时点静默完成 WorkBuddy（腾讯）、Qoder（阿里）、Trae CN（字节）三个 AI IDE 的每日签到与积分领取。全程无窗口，重复运行不会多领，错过的时点开机后自动补跑。
 
 > **非官方工具**：与腾讯、阿里、字节均无隶属关系。签到接口由客户端本地凭据与网络请求逆向得到，可能随时变更且不另行通知。请仅用于自己的账号，风险自负。
 
-## 功能特性
+## 支持情况
 
-- **三套一次跑完**：统一任务 `AllAutoCheckin` 顺序执行，每日覆盖 WorkBuddy 积分、Qoder 100 Credits、Trae CN 200 积分。
-- **凭据自保**：Trae 登录态剩不足 3 天时先拉起一次客户端续期再签到，不再因为「忘记打开 Trae」静默断签。
-- **幂等安全**：均为「未领才领」，重复运行不会多领。
-- **成长中心**：WorkBuddy 侧自动领旅行礼物、派 Buddy、领任务奖励、断签补登、连签兑换与盲盒抽奖。需要真人动作的任务（如「分享一个技能给好友」）只接单不代做，实物奖只提醒不代填地址——所以界面上偶尔仍有红点属正常，判定标准见[文档](workbuddy-scheduled-tasks.md#签到与成长中心自动领哪些哪些领不到)。
-- **静默运行**：`pythonw` / `wscript` 包装，无窗口无弹窗，结果只写 JSON 行日志。
-- **健壮**：错过补跑、防重复实例、单系统超时隔离、网络退避重试。
-- **凭据自管理**：Qoder token 到期前 72 小时自动刷新；仓库不含任何密钥。
-
-## 支持的系统
-
-| 系统 | 每日收益 | 凭据来源 |
-| --- | --- | --- |
+| 客户端 | 每日收益 | 凭据来源 |
+|---|---|---|
 | WorkBuddy | 每日积分 + 成长中心全套 | 桌面端登录写入的加密凭据，运行时经客户端原生接口解密 |
 | Qoder | 100 Credits | `qoder_extract.py` 一次性解密提取（DPAPI + AES-GCM） |
-| Trae CN | 200 积分 | 每次运行实时解密 `storage.json`（自包含信封，无需客户端参与）；token 剩不足 3 天时借助客户端续期 |
+| Trae CN | 200 积分 | 每次运行实时解密 `storage.json`，自包含信封无需客户端参与；token 不足 3 天时借客户端续期 |
 
-各系统的接口契约、任务配置与踩坑记录见[文档](#文档)。
+三套的接口契约与踩坑记录见[文档](#文档)。
 
 ## 环境要求
 
-- **Windows 10 / 11**
-- **Python 3.9+**，无第三方依赖（计划任务用 `pythonw.exe` 静默运行）
-- **Node.js ≥ 22**（可选，仅 Trae 签到需要）
-- 三个客户端各**登录一次**
+- Windows 10 / 11
+- Python 3.9+，无第三方依赖（计划任务用 `pythonw.exe` 静默运行）
+- Node.js ≥ 22，可选，仅 Trae 签到需要
+- 三个客户端各登录一次
 
 ## 快速开始
 
@@ -53,34 +43,34 @@ cd ide-daily-checkin
 # ① 提取 Qoder 凭据（只需一次；须用登录 Qoder 的同一 Windows 用户运行）
 python scripts\qoder_extract.py
 
-# ② 注册统一计划任务（每天 10:20 主跑，12:20 / 14:20 收旅行礼物，15:00 / 20:30 兜底）
+# ② 注册统一计划任务（10:20 主跑，12:20 / 14:20 收旅行礼物，15:00 / 20:30 兜底）
 powershell -ExecutionPolicy Bypass -File scripts\install-all-checkin.ps1
 
 # ③ 查看结果
 Get-Content scripts\all_checkin.log -Tail 5
 ```
 
-WorkBuddy 与 Trae 没有提取步骤，脚本每次运行自动读取本机客户端凭据。Trae 的 token 只有 14 天有效期，且客户端**只在临期（剩 ≤300 秒）或已过期时**才续期——所以「偶尔打开一次」几乎无效。鉴权由主控第一步自动处理：剩余不足 3 天时拉起一次 Trae 完成续期，再签到。
+WorkBuddy 与 Trae 没有提取步骤，脚本每次运行自动读取客户端凭据。
 
-安装脚本支持 `-KeepExisting` 保留已有任务；默认会先注销六个单系统任务。卸载：
+安装脚本默认先注销六个单系统任务，`-KeepExisting` 可保留已有任务。卸载：
 
 ```powershell
 Unregister-ScheduledTask -TaskName "AllAutoCheckin" -Confirm:$false
 ```
 
-单系统独立部署（可选，与统一任务二选一）：
+单系统独立部署与统一任务二选一：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\install-qoder-windows.ps1
 powershell -ExecutionPolicy Bypass -File scripts\install-trae-windows.ps1
 ```
 
-WorkBuddy 的单系统任务（`WorkBuddyAutoSignin` 每日 00:05、`WorkBuddyGrowthPoll` 每日 01/05/09/13/17/21 点）由上游仓库的 `install-windows.ps1` 注册，本仓库不收录该脚本，默认部署也不注册它们——签到统一走 `AllAutoCheckin`。要单独开启整点高频轮询，见 [workbuddy-scheduled-tasks.md](workbuddy-scheduled-tasks.md#单系统任务未注册)。
+WorkBuddy 的单系统任务（`WorkBuddyAutoSignin`、`WorkBuddyGrowthPoll`）由上游仓库的 `install-windows.ps1` 注册，本仓库不收录该脚本，默认部署也不注册它们。要单独开启整点高频轮询，见 [docs/workbuddy.md](docs/workbuddy.md)。
 
 ## 使用
 
 | 操作 | 命令 |
-| --- | --- |
+|---|---|
 | 立即跑一次 | `Start-ScheduledTask -TaskName 'AllAutoCheckin'` |
 | 前台看输出 | `python scripts\run_all_checkin.py` |
 | 查 WorkBuddy 状态 | `python scripts\signin.py status` |
@@ -94,11 +84,13 @@ WorkBuddy 的单系统任务（`WorkBuddyAutoSignin` 每日 00:05、`WorkBuddyGr
 ## 计划任务
 
 | 任务名 | 触发（北京时间） | 内容 |
-| --- | --- | --- |
+|---|---|---|
 | `AllAutoCheckin` | 10:20 主跑，12:20 / 14:20 收旅行礼物，15:00 / 20:30 兜底 | 先做 Trae 凭据续期（临期才动手），再顺序跑三套签到，时限 20 分钟 |
-| `WorkBuddyStreakWarmup` | 每天 10:00，失败当日 18:00 重试 | 连签保活：读桌面端 accessToken，用无头 CLI 跑一次极简会话（`-p "回复ok" --tools ""`），再用探针复核连签天数是否增长；不触碰客户端进程。宿主为 `pythonw.exe`，全程不弹控制台，时限 10 分钟 |
+| `WorkBuddyStreakWarmup` | 10:00，失败当日 18:00 重试 | 连签保活：用无头 CLI 跑一次极简会话，再用探针复核天数是否增长，时限 10 分钟 |
 
-几条设计约定：主跑选 10:20 是因为 Qoder 额度在 10:00（UTC+8）刷新；12:20 / 14:20 两轮专收旅行礼物——Buddy 在主跑时派出，要 2~4 小时才到达，只靠 15:00 那轮会让界面上挂着待领取最长达 2.7 小时；查不到活动时 Qoder 会在本次运行内重查（3 次 × 20 秒），空列表一律按「未下发」处理，绝不当作「已领取」；Trae 续期放在签到之前，过期 token 能在同一次运行里补回；轮询用多个独立 Daily 触发器而非「重复间隔」（后者错过会永久跳过）；`StartWhenAvailable` 补跑、`IgnoreNew` 防重复实例。任务在任务计划程序中默认为隐藏，需「查看 → 显示隐藏的任务」；任务 XML 里时间是 **UTC**。
+两个任务都用 `pythonw.exe` 启动，不弹控制台。主跑时间定在 10:20，是因为 Qoder 额度在 10:00（UTC+8）刷新；12:20 与 14:20 两轮专收旅行礼物，Buddy 在主跑时派出后要 2~4 小时才到达。轮询用多个独立 Daily 触发器而非重复间隔，后者错过会永久跳过。任务在任务计划程序中默认隐藏，需要「查看 → 显示隐藏的任务」；任务 XML 里存的是 UTC 时间。
+
+时点选择、触发器语义与单系统任务的关系见 [docs/workbuddy.md](docs/workbuddy.md)。
 
 ## 目录结构
 
@@ -114,52 +106,49 @@ ide-daily-checkin/
 │   ├── qoder_extract.py             Qoder 凭据提取
 │   ├── trae_auth.mjs                Trae 凭据读取（解密 + 设备号），被下面两个脚本共用
 │   ├── trae_keepalive.mjs           Trae 登录态续期（临期拉起客户端并复核）
-│   ├── trae_checkin_api.mjs         Trae 签到（纯 API）
-│   └── trae_checkin.mjs             Trae CDP 参考实现
-├── workbuddy-scheduled-tasks.md     WorkBuddy 详情（原理 / 任务配置）
-├── qoder-auto-checkin.md            Qoder 详情
-├── trae-auto-checkin.md             Trae 详情
-├── QODER.md                         Qoder 代码级开发文档
+│   └── trae_checkin_api.mjs         Trae 签到（纯 API）
+├── docs/
+│   ├── workbuddy.md                 WorkBuddy 原理与任务配置
+│   ├── qoder.md                     Qoder 部署与排障
+│   ├── qoder-internals.md           Qoder 接口契约与解密链路
+│   └── trae.md                      Trae 纯 API 方案与字段坑
 └── CHANGELOG.md
 ```
 
-凭据（`qoder_config.json`、`qoder_accounts.json`、`.qoder_token_cache.json`）、全部 `*.log` 与运行状态（`.streak_state.json`、`.pending_manual.json`）已在 `.gitignore` 中排除。
+`qoder_config.json`、`qoder_accounts.json`、`.qoder_token_cache.json`、全部 `*.log` 与运行状态（`.streak_state.json`、`.pending_manual.json`）已在 `.gitignore` 中排除。
 
 ## 日志
 
-只需要看 `scripts/all_checkin.log`：每次运行先汇入各步的新增明细行（`script` 字段区分归属），最后一行是汇总。`signin.log` / `qoder_checkin.log` / `trae_checkin.log` 是各脚本原生日志；`trae_keepalive.log` 记 Trae 凭据剩余天数与续期结果；`streak_warmup.log` 是连签保活的会话与复核过程。
-
-Trae 的每条日志都带 `tokenDaysLeft`，凭据到期时间一眼可见。
+日常只需要看 `scripts/all_checkin.log`：每次运行先汇入各步的新增明细行（`script` 字段区分归属），最后一行是汇总。各脚本另有自己的原生日志，`trae_keepalive.log` 记凭据剩余天数与续期结果，`streak_warmup.log` 是连签保活的会话与复核过程。
 
 ## 常见问题
 
 | 现象 | 处理 |
-| --- | --- |
+|---|---|
 | Qoder `LOGIN_REQUIRED` | 同一 Windows 用户重跑 `python scripts\qoder_extract.py` |
 | Qoder `PENDING` | 每日活动未下发，等后续轮询兜底 |
-| Qoder 连续 `ERROR` | 清空 `HTTP(S)_PROXY` 后重试；关注上游适配更新 |
-| WorkBuddy `AUTH_*` / 断签 | 桌面端重新登录；`python scripts\signin.py doctor` 体检 |
-| WorkBuddy 凌晨显示「今日未签到」 | 正常：签到在主跑 10:20，15:00 / 20:30 兜底，零点不跑 |
-| WorkBuddy 成长中心仍有未领取项 | 真人任务、能量不足（低于 `cost_per_open`）、档位未解锁、抽奖次数为 0、旅行在途——均属预期。`signin.log` 里 `growth_result=GROWTH` 且无「失败」二字即脚本正常；需要你亲自动手的任务会列在汇总行的 `pending_manual` 里 |
-| 成长中心连签 ≠ 签到连签 | 两个独立计数：签到连签按天签到累加，成长中心连签要当天有一次真实 AI 会话，客户端成长页显示的是后者 |
-| WorkBuddy 成长中心断连签 | 连签只跟随当天的**真实使用**（一次 AI 会话）；客户端启动、常驻、程序化置前都不算。看 `scripts\streak_warmup.log` 与 `python scripts\probe_streak.py`；accessToken 过期（剩不足 0.5 天）时打开客户端续期 |
-| Trae `LOGIN_REQUIRED` | token 已过期。`node scripts\trae_keepalive.mjs` 可自动拉起客户端续期；仍失败则手动打开一次 Trae 确认登录态 |
-| Trae `tokenDaysLeft` 持续下降 | 正常（14 天有效期）。低于 3 天时续期步骤会自动接管；想提前处理：`node scripts\trae_keepalive.mjs --threshold 5` |
+| Qoder 连续 `ERROR` | 清空 `HTTP(S)_PROXY` 后重试 |
+| WorkBuddy `AUTH_*` 或断签 | 桌面端重新登录，再跑 `python scripts\signin.py doctor` |
+| WorkBuddy 凌晨显示「今日未签到」 | 正常，签到在主跑 10:20，零点不跑 |
+| WorkBuddy 成长中心仍有未领取项 | 真人任务、能量不足、档位未解锁、抽奖次数为 0、旅行在途，都属预期。详见 [docs/workbuddy.md](docs/workbuddy.md#成长中心自动领哪些哪些领不到) |
+| 成长中心连签与签到连签对不上 | 两个独立计数，见 [docs/workbuddy.md](docs/workbuddy.md#两个连签不是同一个数) |
+| Trae `LOGIN_REQUIRED` | token 已过期，`node scripts\trae_keepalive.mjs` 可自动续期；仍失败则手动打开一次 Trae 确认登录态 |
+| Trae `tokenDaysLeft` 持续下降 | 正常，有效期 14 天。低于 3 天时续期步骤会自动接管 |
 
-**客户端不运行也能签到吗？** Qoder 与 Trae 可以（纯 HTTP 调用）；WorkBuddy 需要客户端**已安装**（运行时拉起内部辅助进程解密凭据），但 GUI 不必在运行。
+客户端不运行时，Qoder 与 Trae 可以签到（纯 HTTP 调用）。WorkBuddy 需要客户端已安装，因为要拉起内部辅助进程解密凭据，但 GUI 不必在运行。
 
-## 安全说明
+## 安全
 
-- 凭据文件与日志仅在本地，已在 `.gitignore`；修改忽略规则前确认这几条还在。
-- 脚本默认不打印令牌；`qoder_extract.py --json` 会输出明文 token，仅排错时使用。
-- Qoder 凭据解密依赖 DPAPI，必须在登录 Qoder 的**同一 Windows 用户**下提取。
+- 凭据文件与日志仅存在本地，已在 `.gitignore`。修改忽略规则前确认这几条还在。
+- 脚本默认不打印令牌。`qoder_extract.py --json` 会输出明文 token，仅排错时使用。
+- Qoder 凭据解密依赖 DPAPI，必须在登录 Qoder 的同一 Windows 用户下提取。
 
 ## 文档
 
-- [workbuddy-scheduled-tasks.md](workbuddy-scheduled-tasks.md)：WorkBuddy 原理、任务配置与连签保活
-- [qoder-auto-checkin.md](qoder-auto-checkin.md)：Qoder 原理、部署与已知坑
-- [trae-auto-checkin.md](trae-auto-checkin.md)：Trae 纯 API 方案与服务端字段坑
-- [QODER.md](QODER.md)：Qoder 接口契约、状态机与维护 runbook
+- [docs/workbuddy.md](docs/workbuddy.md)：原理、任务配置与连签保活
+- [docs/qoder.md](docs/qoder.md)：原理、部署与已知问题
+- [docs/qoder-internals.md](docs/qoder-internals.md)：接口契约、状态机与解密链路
+- [docs/trae.md](docs/trae.md)：纯 API 方案与字段坑
 - [CHANGELOG.md](CHANGELOG.md)：版本变更
 
 ## 贡献
@@ -175,4 +164,4 @@ node --check scripts\trae_keepalive.mjs
 
 ## 许可证
 
-[MIT](LICENSE) © 2026 ide-daily-checkin contributors。`signin.py` 来自 [88lin/workbuddy-auto-signin](https://github.com/88lin/workbuddy-auto-signin)，Qoder 脚本改编自 [wallechfox/qoder-checkin](https://github.com/wallechfox/qoder-checkin)，Trae CDP 实现改编自 [BlueChonk/trae-daily-checkin](https://github.com/BlueChonk/trae-daily-checkin)。
+[MIT](LICENSE) © 2026 spirodelazz。`signin.py` 来自 [88lin/workbuddy-auto-signin](https://github.com/88lin/workbuddy-auto-signin)，Qoder 脚本改编自 [wallechfox/qoder-checkin](https://github.com/wallechfox/qoder-checkin)，Trae 方案参考 [BlueChonk/trae-daily-checkin](https://github.com/BlueChonk/trae-daily-checkin)。

@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 ide-daily-checkin contributors
+Copyright (c) 2026 spirodelazz
 
 本仓库包含/改编自以下 MIT 项目的代码，特此声明并致谢：
 
@@ -8,7 +8,7 @@ Copyright (c) 2026 ide-daily-checkin contributors
    https://github.com/88lin/workbuddy-auto-signin (MIT, Copyright (c) 88lin)
 2. scripts/qoder_checkin.py / scripts/qoder_extract.py —— 改编自 wallechfox/qoder-checkin
    https://github.com/wallechfox/qoder-checkin (MIT)
-3. scripts/trae_checkin.mjs —— 改编自 BlueChonk/trae-daily-checkin
+3. scripts/trae_auth.mjs / scripts/trae_checkin_api.mjs —— 参考 BlueChonk/trae-daily-checkin
    https://github.com/BlueChonk/trae-daily-checkin (MIT)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

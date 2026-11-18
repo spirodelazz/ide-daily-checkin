@@ -57,5 +57,4 @@ jobs:
           node --check scripts/trae_auth.mjs
           node --check scripts/trae_checkin_api.mjs
           node --check scripts/trae_keepalive.mjs
-          node --check scripts/trae_checkin.mjs
           echo "All JS modules OK"
